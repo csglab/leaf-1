@@ -1,0 +1,64 @@
+# MIL training config (bulk-ATAC / TCGA preset).
+#
+# Keys under `data:` and `defaults:` set defaults consumed by `leaf1-mil`.
+# Keys under `sweep.grid` are expanded by `scripts/run_mil_sweep.sh` into
+# CLI flags, ONE FLAG PER KEY. Every grid key MUST match a real CLI flag
+# accepted by `leaf1-mil --help`.
+
+data:
+  # TCGA / bulk-ATAC preset uses 2-segment input (no `cut` channel).
+  segments: "mod,fragment1"
+
+  # Smoke default. Paper-canonical bulk-ATAC sweeps used 10,000 frags/bag;
+  # this matches that. Override with `--frags_per_bag` if you want a larger
+  # bag.
+  frags_per_bag: 10000
+
+  embed_key: "embeddings"
+  layer_idx: 4
+  load_workers: 12
+  dataloader_workers: 8
+
+defaults:
+  seed: 42
+  batch_size: 8
+  base_lr: 5.0e-4
+  max_epochs: 200
+
+training:
+  early_stopping:
+    primary: "ema5"
+    delta: 0.005
+    patience: 20
+    warmup_patience: 10
+  scheduler:
+    warmup_epochs: 5
+    flat_epochs: 15
+    min_lr: 1.0e-6
+  save_best: true
+  save_last: false
+
+# -----------------------------------------------------------------------
+# Sweep grid (see cfdna.yaml for the conventions).
+# -----------------------------------------------------------------------
+sweep:
+  enabled: true
+  grid:
+    # Classifier L2.
+    head_C: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+    head_l1_ratio: [0.0]
+
+    # Regularisation (scheme + value as paired axes).
+    reg_scheme:   [dropout]
+    scheme_value: [0.0, 0.1, 0.2]
+
+    # Learning rate.
+    base_lr: [1.0e-3, 3.0e-4]
+
+    # Feature projection.
+    feat_proj:     [linear]
+    feat_proj_dim: [512, 1024]
+
+    # Attention rescaling.
+    att_fix:         [hhi, entropy]
+    att_temperature: [1.0]

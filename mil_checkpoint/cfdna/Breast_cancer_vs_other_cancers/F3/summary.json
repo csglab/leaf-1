@@ -1,0 +1,55 @@
+{
+  "dataset": "Breast",
+  "split": "Breast_cancer_vs_other_cancers_k5.json",
+  "outer_fold": 3,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Breast_cancer_vs_other_cancers_F3_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 41,
+      "val_auc": 0.9468599033816425,
+      "test_auc": 0.7079831932773109
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 39,
+      "val_auc": 0.7729468599033816,
+      "test_auc": 0.615546218487395
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 16,
+      "val_auc": 0.9136363636363636,
+      "test_auc": 0.6974789915966386
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 97,
+      "val_auc": 0.95,
+      "test_auc": 0.7457983193277311
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 54,
+      "val_auc": 0.9636363636363636,
+      "test_auc": 0.6512605042016807
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.6512605042016807,
+    "test_auprc": 0.4664408483199412,
+    "mean_of_aucs": 0.6836134453781513
+  },
+  "timestamp": "2025-12-25T14:53:29.901942"
+}

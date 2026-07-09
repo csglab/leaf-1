@@ -1,0 +1,55 @@
+{
+  "dataset": "Pancreatic",
+  "split": "Pancreatic_cancer_vs_healthy_k5.json",
+  "outer_fold": 2,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Pancreatic_cancer_vs_healthy_F2_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 50,
+      "val_auc": 0.9682539682539683,
+      "test_auc": 0.9933035714285714
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 19,
+      "val_auc": 0.988095238095238,
+      "test_auc": 0.9709821428571428
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 23,
+      "val_auc": 1.0,
+      "test_auc": 0.9508928571428571
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 57,
+      "val_auc": 0.9930313588850174,
+      "test_auc": 0.9754464285714286
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 38,
+      "val_auc": 0.9303135888501742,
+      "test_auc": 0.984375
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.9732142857142857,
+    "test_auprc": 0.8073412698412699,
+    "mean_of_aucs": 0.975
+  },
+  "timestamp": "2025-12-24T12:43:50.630481"
+}

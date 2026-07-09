@@ -1,0 +1,55 @@
+{
+  "dataset": "Gastric",
+  "split": "Gastric_cancer_vs_other_cancers_k5.json",
+  "outer_fold": 2,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Gastric_cancer_vs_other_cancers_F2_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 31,
+      "val_auc": 0.9943181818181819,
+      "test_auc": 0.8995535714285714
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 29,
+      "val_auc": 1.0,
+      "test_auc": 0.8794642857142857
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 19,
+      "val_auc": 1.0,
+      "test_auc": 0.9129464285714286
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 17,
+      "val_auc": 0.958139534883721,
+      "test_auc": 0.9263392857142857
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 26,
+      "val_auc": 0.9545454545454546,
+      "test_auc": 0.9040178571428572
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.8772321428571428,
+    "test_auprc": 0.41873149599442705,
+    "mean_of_aucs": 0.9044642857142857
+  },
+  "timestamp": "2025-12-18T16:42:15.875177"
+}

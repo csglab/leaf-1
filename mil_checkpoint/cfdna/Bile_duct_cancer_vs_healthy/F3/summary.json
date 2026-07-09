@@ -1,0 +1,55 @@
+{
+  "dataset": "Bile",
+  "split": "Bile_duct_cancer_vs_healthy_k5.json",
+  "outer_fold": 3,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Bile_duct_cancer_vs_healthy_F3_dropout_100k",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 31,
+      "val_auc": 1.0,
+      "test_auc": 0.993220338983051
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 23,
+      "val_auc": 0.7556818181818182,
+      "test_auc": 0.9796610169491525
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 29,
+      "val_auc": 0.9943181818181818,
+      "test_auc": 0.9898305084745763
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 21,
+      "val_auc": 0.9886363636363635,
+      "test_auc": 0.9966101694915254
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 39,
+      "val_auc": 0.9715909090909091,
+      "test_auc": 0.9932203389830508
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.8508474576271186,
+    "test_auprc": 0.24155289155289156,
+    "mean_of_aucs": 0.9905084745762711
+  },
+  "timestamp": "2026-01-18T11:31:54.515833"
+}

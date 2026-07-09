@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Runs / logs / outputs
+logs/
+out/
+output/
+wandb/
+checkpoints/
+*.log
+
+# HDF5 outputs and job artifacts produced by extract_embeddings.sh
+h5_files/
+jobs_*/
+parallel_logs_*/
+evaluation_summary_*.txt
+.pytest_cache/
+.coverage
+HANDOFF.md
+VALIDATION.md
+# Test-generated path-bearing fixtures
+tests/fixtures/manifest.csv
+tests/fixtures/downstream/metadata.csv
+tests/fixtures/downstream/mil_data/metadata_complete.csv
+tests/fixtures/downstream/h5_files/
+

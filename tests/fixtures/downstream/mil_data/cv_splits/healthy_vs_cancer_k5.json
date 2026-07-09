@@ -1,0 +1,1 @@
+{"metadata": {"comparison_type": "cancer_vs_healthy", "target": "cancer"}, "splits": [{"train_idx": [0, 1, 4, 5], "eval_idx": [2, 3, 6, 7]}, {"train_idx": [2, 3, 6, 7], "eval_idx": [0, 1, 4, 5]}]}

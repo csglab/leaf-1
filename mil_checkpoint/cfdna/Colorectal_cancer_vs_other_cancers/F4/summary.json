@@ -1,0 +1,55 @@
+{
+  "dataset": "Colorectal",
+  "split": "Colorectal_cancer_vs_other_cancers_k5.json",
+  "outer_fold": 4,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Colorectal_cancer_vs_other_cancers_F4_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 14,
+      "val_auc": 0.9488636363636365,
+      "test_auc": 0.9674185463659148
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 32,
+      "val_auc": 0.9674418604651163,
+      "test_auc": 0.9899749373433584
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 18,
+      "val_auc": 0.9627906976744185,
+      "test_auc": 0.9598997493734335
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 24,
+      "val_auc": 1.0,
+      "test_auc": 0.9172932330827068
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 24,
+      "val_auc": 0.9545454545454545,
+      "test_auc": 0.987468671679198
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.7744360902255639,
+    "test_auprc": 0.2321058748488416,
+    "mean_of_aucs": 0.9644110275689224
+  },
+  "timestamp": "2025-12-18T01:28:05.447985"
+}

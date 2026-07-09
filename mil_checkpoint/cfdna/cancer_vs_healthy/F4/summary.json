@@ -1,0 +1,55 @@
+{
+  "dataset": "cancer",
+  "split": "cancer_vs_healthy_k5.json",
+  "outer_fold": 4,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_cancer_vs_healthy_F4_dropout_100k",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 50,
+      "val_auc": 0.9669995657837602,
+      "test_auc": 0.9604465709728868
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 34,
+      "val_auc": 0.9491966999565783,
+      "test_auc": 0.9368421052631578
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 53,
+      "val_auc": 0.9574468085106383,
+      "test_auc": 0.9585326953748007
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 61,
+      "val_auc": 0.9869791666666667,
+      "test_auc": 0.94896331738437
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 29,
+      "val_auc": 0.9596354166666666,
+      "test_auc": 0.934609250398724
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.8261562998405103,
+    "test_auprc": 0.8483543914980862,
+    "mean_of_aucs": 0.9478787878787879
+  },
+  "timestamp": "2026-01-24T09:26:56.186237"
+}

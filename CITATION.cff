@@ -1,0 +1,72 @@
+cff-version: 1.2.0
+title: "LEAF-1: Semantic fragment representations for coordinate-free analysis of genomics data"
+message: "If you use this software, please cite both the software and the manuscript below."
+type: software
+authors:
+  - family-names: Heydari
+    given-names: Hamed
+    affiliation: "Department of Human Genetics, McGill University; Victor P. Dahdaleh Institute of Genomic Medicine; Arc Institute"
+    email: hheydarii@gmail.com
+  - family-names: Zhao
+    given-names: Jing
+    affiliation: "Department of Human Genetics, McGill University; Victor P. Dahdaleh Institute of Genomic Medicine"
+  - family-names: Arseneault
+    given-names: Madeleine
+    affiliation: "Victor P. Dahdaleh Institute of Genomic Medicine"
+  - family-names: Younesian
+    given-names: Leila
+    affiliation: "Victor P. Dahdaleh Institute of Genomic Medicine"
+  - family-names: Tanguay
+    given-names: Simon
+    affiliation: "Division of Urology, McGill University"
+  - family-names: Riazalhosseini
+    given-names: Yasser
+    affiliation: "Department of Human Genetics, McGill University; Victor P. Dahdaleh Institute of Genomic Medicine"
+  - family-names: Goodarzi
+    given-names: Hani
+    affiliation: "Arc Institute; University of California, San Francisco"
+    email: hani.goodarzi@arcinstitute.org
+  - family-names: Najafabadi
+    given-names: Hamed
+    affiliation: "Department of Human Genetics, McGill University; Victor P. Dahdaleh Institute of Genomic Medicine"
+    email: hamed.najafabadi@mcgill.ca
+repository-code: "https://github.com/csglab/leaf-1"
+abstract: >-
+  LEAF-1 is a 12-layer DistilBERT-style transformer pretrained with masked-language modeling
+  over 57.1 billion sequenced DNA fragments from cell-free DNA, bulk ATAC-seq, and
+  single-cell ATAC-seq before modality-balancing replication. The frozen encoder produces
+  a 9,984-dimensional window-pooled embedding per fragment. Downstream classifiers reach
+  pan-cancer cfDNA detection AUC 0.949 on the Cristiano cohort and scATAC cell-type
+  classification mean AUC 0.93 with a simple linear probe.
+license: PolyForm-Noncommercial-1.0.0
+version: "0.1.0"
+keywords:
+  - cfDNA
+  - scATAC
+  - fragmentomics
+  - DNA language model
+  - cancer detection
+  - MLM pretraining
+preferred-citation:
+  type: article
+  title: "Semantic fragment representations for coordinate-free analysis of genomics data"
+  year: 2026
+  journal: "bioRxiv"
+  notes: "Hamed Heydari and Jing Zhao contributed equally. Corresponding authors: Hani Goodarzi (hani.goodarzi@arcinstitute.org) and Hamed Najafabadi (hamed.najafabadi@mcgill.ca)."
+  authors:
+    - family-names: Heydari
+      given-names: Hamed
+    - family-names: Zhao
+      given-names: Jing
+    - family-names: Arseneault
+      given-names: Madeleine
+    - family-names: Younesian
+      given-names: Leila
+    - family-names: Tanguay
+      given-names: Simon
+    - family-names: Riazalhosseini
+      given-names: Yasser
+    - family-names: Goodarzi
+      given-names: Hani
+    - family-names: Najafabadi
+      given-names: Hamed

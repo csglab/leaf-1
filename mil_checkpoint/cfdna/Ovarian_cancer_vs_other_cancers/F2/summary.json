@@ -1,0 +1,55 @@
+{
+  "dataset": "Ovarian",
+  "split": "Ovarian_cancer_vs_other_cancers_k5.json",
+  "outer_fold": 2,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Ovarian_cancer_vs_other_cancers_F2_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 24,
+      "val_auc": 0.6923076923076923,
+      "test_auc": 0.709375
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 21,
+      "val_auc": 0.9196428571428571,
+      "test_auc": 0.740625
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 21,
+      "val_auc": 0.9487179487179488,
+      "test_auc": 0.721875
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 21,
+      "val_auc": 0.8012820512820513,
+      "test_auc": 0.76875
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 21,
+      "val_auc": 0.8057142857142857,
+      "test_auc": 0.84375
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.746875,
+    "test_auprc": 0.35371360665478313,
+    "mean_of_aucs": 0.756875
+  },
+  "timestamp": "2025-12-23T13:55:10.392091"
+}

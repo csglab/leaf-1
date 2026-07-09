@@ -1,0 +1,31 @@
+name: leaf1-gpu
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch=2.1.2
+  - pytorch-cuda=12.1
+  - transformers=4.37.1
+  - tokenizers=0.15.1
+  - accelerate=0.26.1
+  - evaluate=0.4.1
+  - numpy=1.26
+  - pandas
+  - h5py
+  - scikit-learn
+  - scipy
+  - tqdm
+  - pyyaml
+  - threadpoolctl
+  - joblib
+  - matplotlib
+  - seaborn
+  - pytest
+  - coverage
+  - bedtools=2.31.1
+  - samtools
+  - parallel

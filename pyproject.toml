@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leaf1"
+version = "0.1.0"
+description = "LEAF-1: semantic fragment representations for coordinate-free analysis of genomics data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "PolyForm Noncommercial License 1.0.0" }
+authors = [
+  { name = "Hamed Heydari", email = "hheydarii@gmail.com" },
+]
+keywords = ["cfDNA", "scATAC", "transformer", "fragmentomics", "MLM", "DNA language model"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Intended Audience :: Science/Research",
+]
+
+# Versions mirror the paper-era runtime. Keep upper bounds tight for reproducible
+# extraction: newer torch/transformers combinations may select CUDA runtimes that
+# exceed local drivers or route DistilBERT through different attention kernels.
+dependencies = [
+  "torch>=2.1,<2.2",
+  "transformers>=4.36,<4.38",
+  "tokenizers>=0.15,<0.16",
+  "accelerate>=0.25,<0.27",
+  "evaluate>=0.4",
+  "scikit-learn>=1.3",
+  "numpy>=1.24,<2",
+  "pandas>=1.5",
+  "h5py>=3.9",
+  "tqdm>=4.65",
+  # Downstream MIL + mean-pool deps
+  "pyyaml>=6",
+  "threadpoolctl>=3",
+  "joblib>=1.3",
+  "matplotlib>=3.7",
+  "seaborn>=0.12",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8",
+  "coverage>=7",
+]
+
+[project.scripts]
+leaf1-pretrain = "leaf1.train.pretrain:main"
+leaf1-extract = "leaf1.infer.extract_embeddings:main"
+leaf1-mean-pool-aggregate = "leaf1.downstream.mean_pool.aggregate:main"
+leaf1-mean-pool-train = "leaf1.downstream.mean_pool.train:main"
+leaf1-mil = "leaf1.downstream.mil.train:main"
+leaf1-mil-predict = "leaf1.downstream.mil.inference:main"
+leaf1-bed-preprocess = "leaf1.util.bed_preprocess:main"
+leaf1-reshape-layer = "leaf1.util.reshape_layer:main"
+leaf1-validate-extract = "leaf1.util.validate_extract:main"
+
+[project.urls]
+Homepage = "https://github.com/csglab/leaf-1"
+Issues = "https://github.com/csglab/leaf-1/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["leaf1*"]
+exclude = ["tests*", "scripts*", "assets*"]
+
+[tool.setuptools.package-data]
+# Ship the tokenizer with the wheel so users have a reproducible default.
+# Large assets live in the source checkout through Git LFS, not inside wheels.
+# Also ship the MIL sweep-grid YAMLs.
+leaf1 = [
+  "data/tokenizer.json",
+  "downstream/mil/configs/*.yaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::FutureWarning",
+]

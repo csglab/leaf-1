@@ -1,0 +1,55 @@
+{
+  "dataset": "Lung",
+  "split": "Lung_cancer_vs_healthy_k5.json",
+  "outer_fold": 3,
+  "n_inner_folds": 5,
+  "frags_per_bag": 100000,
+  "data_mode": "OPTIMIZED_PIPELINE+accum4",
+  "optimizations": {
+    "optimized_pipeline": true,
+    "n_precollate_epochs": 5,
+    "n_readers": 2,
+    "queue_depth": 2,
+    "nvme_path": "/media/8TBNVME/goodarzilab/hamedh/tmp/mil_cache_Lung_cancer_vs_healthy_F3_dropout",
+    "amp": false,
+    "gradient_accumulation": 4
+  },
+  "per_fold_results": [
+    {
+      "inner_fold": 0,
+      "best_epoch": 25,
+      "val_auc": 0.9856770833333333,
+      "test_auc": 0.9408333333333334
+    },
+    {
+      "inner_fold": 1,
+      "best_epoch": 18,
+      "val_auc": 0.9142857142857143,
+      "test_auc": 0.9216666666666666
+    },
+    {
+      "inner_fold": 2,
+      "best_epoch": 24,
+      "val_auc": 0.9128571428571428,
+      "test_auc": 0.7270833333333333
+    },
+    {
+      "inner_fold": 3,
+      "best_epoch": 22,
+      "val_auc": 0.9442176870748299,
+      "test_auc": 0.9220833333333333
+    },
+    {
+      "inner_fold": 4,
+      "best_epoch": 28,
+      "val_auc": 0.9687074829931973,
+      "test_auc": 0.9191666666666666
+    }
+  ],
+  "ensemble_metrics": {
+    "test_auc": 0.7666666666666666,
+    "test_auprc": 0.5327965389873284,
+    "mean_of_aucs": 0.8861666666666667
+  },
+  "timestamp": "2025-12-20T15:52:29.444888"
+}
