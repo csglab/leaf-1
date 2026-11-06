@@ -20,19 +20,26 @@ class DataCollatorForDNAFragmentModelingNoDecay:
         probability_matrix = torch.full(labels.shape, self.mlm_probability)
 
         cut_bool_matrix = (inputs == self.cut_token_id)
-        cut_positions = cut_bool_matrix.nonzero(as_tuple=True)
-        batch_indices, cut_indices = cut_positions
+        n_cut_per_row = cut_bool_matrix.sum(dim=1)
+        has_cut = bool((n_cut_per_row > 0).any())
+        # two [CUT] tokens per row, or none (nocut)
+        if has_cut and not bool((n_cut_per_row == 2).all()):
+            raise ValueError(f"expected 2 [CUT] tokens per row (or none); got {n_cut_per_row.tolist()}")
 
-        probability_matrix[batch_indices, cut_indices] = self.cut_token_probability
+        if has_cut:
+            cut_positions = cut_bool_matrix.nonzero(as_tuple=True)
+            batch_indices, cut_indices = cut_positions
 
-        # Joint masking: each row either masks both [CUT] tokens or neither.
-        # `cut_indices` arrives as a flat tensor of length 2 * batch_size (two
-        # boundaries per row). Reshape to (batch_size, 2) so indexing into
-        # probability_matrix touches both CUT positions of each row together.
-        cut_indices = cut_indices.view(-1, 2)
-        for i in range(len(inputs)):
-            mask_both = torch.bernoulli(torch.tensor(self.cut_token_probability)).bool()
-            probability_matrix[i, cut_indices[i]] = 1.0 if mask_both else 0.0
+            probability_matrix[batch_indices, cut_indices] = self.cut_token_probability
+
+            # Joint masking: each row either masks both [CUT] tokens or neither.
+            # `cut_indices` arrives as a flat tensor of length 2 * batch_size (two
+            # boundaries per row). Reshape to (batch_size, 2) so indexing into
+            # probability_matrix touches both CUT positions of each row together.
+            cut_indices = cut_indices.view(-1, 2)
+            for i in range(len(inputs)):
+                mask_both = torch.bernoulli(torch.tensor(self.cut_token_probability)).bool()
+                probability_matrix[i, cut_indices[i]] = 1.0 if mask_both else 0.0
 
         special_tokens_mask = [
             self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True)

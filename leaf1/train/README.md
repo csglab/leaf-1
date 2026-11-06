@@ -44,8 +44,23 @@ Full list: `leaf1-pretrain --help`. Paper-canonical values:
 | `--weight_decay` | 1e-5 | AdamW |
 | `--mlm_probability` | 0.15 | base token mask rate |
 | `--cut_mlm_probability` | 0.30 | joint [CUT] mask rate |
+| `--ablation` | none | pretraining ablation, see below |
 | `--bf16` | set by `pretrain.sh` | mixed precision; pretrain falls back to fp32 on CPU |
 | `--seed` | 42 | |
+
+### Ablations
+
+`--ablation` changes one design element and leaves everything else as in the released model:
+
+| Value | Change |
+|---|---|
+| `none` | released input: `[CLS] [MOD] left [CUT] body [CUT] right` |
+| `nocut` | no [CUT] tokens; left + body + right tokenized as one string |
+| `eqmask` | [CUT] masked at `--mlm_probability` instead of `--cut_mlm_probability` |
+| `noflank` | no flanks: `[CLS] [MOD] [CUT] body [CUT]` (use `--seq_len 512 --min_flank 0`) |
+| `nomod` | modality token replaced by the same placeholder (`[SEP]`) for every sample |
+
+Non-default runs get `_ABL<value>` appended to the run name.
 
 ## Eval metrics
 
@@ -54,6 +69,7 @@ Logged every `--eval_steps` (default 250) by the HF Trainer. Defined in `compute
 | Metric | Meaning |
 |---|---|
 | `overall_accuracy` | MLM accuracy across all masked positions |
+| `noncut_accuracy` | MLM accuracy on masked non-[CUT] tokens; comparable across ablations |
 | `cut_precision`, `cut_recall`, `cut_mcc` | precision, recall, Matthews correlation for predicting [CUT] at masked positions |
 | `accuracy_{1,5,10,20}_around_cut` | MLM accuracy on non-[CUT] tokens within N positions of a [CUT] |
 | `token_len_{1..6}_precision`, `_recall` | macro precision/recall per byte-length class K of the target token; K=6 covers ≥6 |

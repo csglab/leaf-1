@@ -22,7 +22,7 @@ from torch.utils.data import IterableDataset
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerFast
 
-from .get_fragment import initialize_iterable_get_fragment
+from .get_fragment import check_ablation, initialize_iterable_get_fragment, modality_slot_token
 from .modality import resolve_modality_token
 
 
@@ -30,8 +30,9 @@ class TrainingDNAFragmentDataset(IterableDataset):
     def __init__(self, tokenizer_file, ref_genome_file, n_fragment_file,
                  n_fragments_per_iteration=1000, max_token_length=1024,
                  min_flank_token_length=100, seed=None, n_shards=1,
-                 return_token_type_ids=False, return_special_tokens_mask=False):
+                 return_token_type_ids=False, return_special_tokens_mask=False, ablation="none"):
         super().__init__()
+        self.ablation = check_ablation(ablation)
         self.ref_genome_file = ref_genome_file
         self.total_length = max_token_length
         self.min_flank = min_flank_token_length
@@ -136,6 +137,7 @@ class TrainingDNAFragmentDataset(IterableDataset):
                     self.total_length,
                     self.min_flank,
                     seed=file_seeds[row['bed_file']],
+                    ablation=self.ablation,
                 )
                 for _, row in pbar
             }
@@ -151,7 +153,7 @@ class TrainingDNAFragmentDataset(IterableDataset):
             for _, row in shard_df.iterrows():
                 bed_file = row['bed_file']
                 total_fragments_in_file = row['n_fragment']
-                modality = resolve_modality_token(self.tokenizer, row['modality'])
+                modality = modality_slot_token(resolve_modality_token(self.tokenizer, row['modality']), self.ablation)
 
                 read_count = fragments_read[bed_file]
                 if read_count < total_fragments_in_file:

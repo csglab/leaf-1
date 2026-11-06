@@ -36,9 +36,9 @@ for k in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
 
 # Ensure leaf1.* is importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from leaf1.common.get_fragment import initialize_iterable_get_fragment
+from leaf1.common.get_fragment import check_ablation, initialize_iterable_get_fragment, modality_slot_token
 from leaf1.common.modality import resolve_modality_token
-from leaf1.common.pool import compute_window_embeddings
+from leaf1.common.pool import compute_window_embeddings, compute_window_embeddings_from_counts
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -66,7 +66,9 @@ def window_embed_dim_for(embed_dim: int) -> int:
 class SingleFileDNAFragmentDataset(Dataset):
     def __init__(self, tokenizer_file, ref_genome_file, bed_file_row,
                  n_fragment_per_file=100000, max_token_length=2048,
-                 min_flank_token_length=100, seed=42):
+                 min_flank_token_length=100, seed=42, ablation="none",
+                 presample=None, per_fragment_rng=False):
+        self.ablation = check_ablation(ablation)
         self.ref_genome_file = ref_genome_file
         self.total_length = max_token_length
         self.min_flank = min_flank_token_length
@@ -95,14 +97,24 @@ class SingleFileDNAFragmentDataset(Dataset):
         if not os.path.isfile(self.bed_file):
             raise FileNotFoundError(f"BED file not found: {self.bed_file}")
 
-        n_to_sample = min(self.total_fragments_in_file, self.n_fragment_per_file)
-        self.sampled_indices = self.rng.choice(
-            self.total_fragments_in_file, size=n_to_sample, replace=False
-        )
+        if presample:
+            # nested draw: the `presample` set for this seed, then a fresh-seed subsample of it.
+            # 100000 -> 10000 gives the fragments used in the Fig 4 benchmark, in the same order.
+            pool = np.random.default_rng(seed).choice(
+                self.total_fragments_in_file, size=min(self.total_fragments_in_file, presample), replace=False)
+            sub = np.random.default_rng(seed).choice(
+                len(pool), size=min(len(pool), self.n_fragment_per_file), replace=False)
+            self.sampled_indices = pool[sub]
+        else:
+            n_to_sample = min(self.total_fragments_in_file, self.n_fragment_per_file)
+            self.sampled_indices = self.rng.choice(
+                self.total_fragments_in_file, size=n_to_sample, replace=False
+            )
 
         self.get_fragment = initialize_iterable_get_fragment(
             self.tokenizer, self.bed_file, self.ref_genome_file,
-            self.total_length, self.min_flank, seed=self.seed,
+            self.total_length, self.min_flank, seed=self.seed, ablation=self.ablation,
+            per_fragment_rng=per_fragment_rng,
         )
 
         print(f"Initialized dataset for {self.bed_file}")
@@ -118,7 +130,7 @@ class SingleFileDNAFragmentDataset(Dataset):
         line_number = self.sampled_indices[idx]
         fragment = self.get_fragment(line_number)
 
-        modality_token = resolve_modality_token(self.tokenizer, self.modality)
+        modality_token = modality_slot_token(resolve_modality_token(self.tokenizer, self.modality), self.ablation)
         sequence_with_modality = modality_token + fragment["final_sequence"]
 
         tokenized_input = self.tokenizer(
@@ -159,6 +171,8 @@ def create_h5_structure(h5_file, n_samples, dataset_info, *,
     window_embed_dim = window_embed_dim_for(embed_dim)
 
     emb_group = h5_file.create_group("embeddings")
+    if dataset_info.get("store_body_mean"):
+        emb_group.create_dataset("body_mean", shape=(n_samples, embed_dim), dtype=np.float16)
 
     if dataset_info.get("target_layer") is not None:
         emb_group.create_dataset(
@@ -214,7 +228,7 @@ def create_h5_structure(h5_file, n_samples, dataset_info, *,
     prog_group.attrs["completed"] = False
 
 
-def process_batch(bert_model, batch, device, target_layer=None):
+def process_batch(bert_model, batch, device, target_layer=None, ablation="none", return_body_mean=False):
     num_layers = len(bert_model.distilbert.transformer.layer)
     embed_dim = bert_model.config.dim
     window_embed_dim = window_embed_dim_for(embed_dim)
@@ -236,6 +250,29 @@ def process_batch(bert_model, batch, device, target_layer=None):
     start_pos = n_token_left + 2
     end_pos = start_pos + n_token_frag + 1
     batch_size = input_ids.size(0)
+
+    def windows(states):
+        if ablation == "nocut":
+            return compute_window_embeddings_from_counts(
+                states, n_token_left, n_token_frag, batch["n_token_right"].to(device), NUM_WINDOWS)
+        out = compute_window_embeddings(states, start_pos, end_pos, NUM_WINDOWS)
+        if ablation == "noflank":   # no flanks, zero both flank chunks
+            out[:, : NUM_WINDOWS * embed_dim] = 0
+            out[:, 2 * NUM_WINDOWS * embed_dim: 3 * NUM_WINDOWS * embed_dim] = 0
+        return out
+
+    def body_mean(states):
+        """Mean over the fragment-body tokens. Unlike the window chunks, it means the same thing
+        for every ablation."""
+        pos = torch.arange(states.size(1), device=device).expand(batch_size, -1)
+        if ablation == "nocut":
+            lo = (2 + n_token_left).unsqueeze(1)
+            mask = (pos >= lo) & (pos < lo + n_token_frag.unsqueeze(1))
+        else:
+            mask = (pos > start_pos.unsqueeze(1)) & (pos < end_pos.unsqueeze(1))
+        if (mask.sum(1) == 0).any():
+            raise ValueError("a row has no body tokens")
+        return (states * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True)
 
     # The paper H5 embeddings were generated through DistilBERT's legacy layer
     # API with a 2-D boolean mask. Keep that path as the first choice for
@@ -267,38 +304,38 @@ def process_batch(bert_model, batch, device, target_layer=None):
                 batch_size, num_layers + 1, window_embed_dim,
                 dtype=torch.float16, device="cpu",
             )
-            all_window_embeddings[:, 0, :] = compute_window_embeddings(
-                hidden_states, start_pos, end_pos, NUM_WINDOWS
-            ).half().cpu()
+            all_window_embeddings[:, 0, :] = windows(hidden_states).half().cpu()
 
             for layer_idx, layer in enumerate(bert_model.distilbert.transformer.layer):
                 hidden_states = run_layer(layer, hidden_states)
-                all_window_embeddings[:, layer_idx + 1, :] = compute_window_embeddings(
-                    hidden_states, start_pos, end_pos, NUM_WINDOWS
-                ).half().cpu()
+                all_window_embeddings[:, layer_idx + 1, :] = windows(hidden_states).half().cpu()
         else:
             if target_layer == 0:
-                layer_emb = compute_window_embeddings(
-                    hidden_states, start_pos, end_pos, NUM_WINDOWS
-                )
+                layer_emb = windows(hidden_states)
             else:
                 for layer_idx, layer in enumerate(bert_model.distilbert.transformer.layer):
                     hidden_states = run_layer(layer, hidden_states)
                     if layer_idx + 1 == target_layer:
-                        layer_emb = compute_window_embeddings(
-                            hidden_states, start_pos, end_pos, NUM_WINDOWS
-                        )
+                        layer_emb = windows(hidden_states)
                         break
             all_window_embeddings = layer_emb.half().cpu()
+            if return_body_mean:
+                bm = body_mean(hidden_states).half().cpu().numpy()
 
+    if return_body_mean:
+        if target_layer is None:
+            raise ValueError("return_body_mean requires a single --target_layer")
+        return all_window_embeddings.numpy(), bm
     return all_window_embeddings.numpy()
 
 
-def store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx):
+def store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx, body_mean=None):
     batch_size = window_embeddings.shape[0]
     end_idx = start_idx + batch_size
 
     h5_file["embeddings/bert_window_embeddings"][start_idx:end_idx] = window_embeddings
+    if body_mean is not None:
+        h5_file["embeddings/body_mean"][start_idx:end_idx] = body_mean
 
     for i in range(batch_size):
         idx = start_idx + i
@@ -314,7 +351,11 @@ def store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx):
 def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, index, output_dir,
                        tokenizer_file, ref_genome_file,
                        batch_size=32, seed=42, target_layer=None,
-                       max_token_length=2048, min_flank_token_length=100):
+                       max_token_length=2048, min_flank_token_length=100, ablation="none",
+                       store_body_mean=False, presample=None, per_fragment_rng=False):
+    check_ablation(ablation)
+    if store_body_mean and target_layer is None:
+        raise ValueError("--store_body_mean requires --target_layer")
     output_dir = Path(output_dir)
     h5_dir = output_dir / "h5_files"
     log_dir = output_dir / "logs"
@@ -342,6 +383,14 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
     embed_dim = model_config.dim
     num_bert_layers = model_config.n_layers
     window_embed_dim = window_embed_dim_for(embed_dim)
+    max_pos = model_config.max_position_embeddings
+    if max_token_length > max_pos:
+        raise ValueError(f"--max_token_length {max_token_length} exceeds the checkpoint's "
+                         f"max_position_embeddings {max_pos}")
+    if ablation != "none" and max_token_length != max_pos:
+        # [PAD] is attended to, so ablation models have to run at their training length
+        raise ValueError(f"--ablation {ablation}: --max_token_length {max_token_length} must equal the "
+                         f"training length (max_position_embeddings {max_pos})")
 
     print(f"Output H5 file: {h5_path}")
     print(f"Output log file: {log_path}")
@@ -366,6 +415,16 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
                 raise ValueError(f"Seed mismatch: stored {stored_seed} vs current {seed}")
             if stored_batch_size != batch_size:
                 raise ValueError(f"Batch size mismatch: stored {stored_batch_size} vs current {batch_size}")
+            if store_body_mean != ("body_mean" in f["embeddings"]):
+                raise ValueError(f"--store_body_mean={store_body_mean} does not match the existing H5 {h5_path}")
+            stored_ablation = f["metadata"].attrs.get("ablation", "none") if "metadata" in f else "none"
+            if stored_ablation != ablation:
+                raise ValueError(f"Ablation mismatch: stored {stored_ablation!r} vs current {ablation!r}")
+            meta = f["metadata"].attrs if "metadata" in f else {}
+            stored = (int(meta.get("presample", 0)), bool(meta.get("per_fragment_rng", False)))
+            if stored != (int(presample or 0), bool(per_fragment_rng)):
+                raise ValueError(f"(presample, per_fragment_rng) mismatch: stored {stored} vs current "
+                                 f"{(int(presample or 0), bool(per_fragment_rng))}")
             resume_from_batch = f["progress"].attrs["current_batch_idx"] + 1
             print(f"Resuming from batch {resume_from_batch}")
 
@@ -377,7 +436,10 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
         n_fragment_per_file=n_fragment_per_file,
         max_token_length=max_token_length,
         min_flank_token_length=min_flank_token_length,
+        ablation=ablation,
         seed=seed,
+        presample=presample,
+        per_fragment_rng=per_fragment_rng,
     )
 
     dataloader = DataLoader(
@@ -403,6 +465,17 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             "batch_size": batch_size,
             "target_layer": target_layer,
         }
+        # only written when set, so default H5 files are unchanged
+        if ablation != "none":
+            dataset_info["ablation"] = ablation
+        if store_body_mean:
+            dataset_info["store_body_mean"] = True
+        if presample:
+            dataset_info["presample"] = int(presample)
+        if per_fragment_rng:
+            dataset_info["per_fragment_rng"] = True
+        if ablation != "none" or store_body_mean or presample or per_fragment_rng:
+            dataset_info["max_token_length"] = int(max_token_length)
         create_h5_structure(
             h5_file, len(dataset), dataset_info,
             embed_dim=embed_dim, num_bert_layers=num_bert_layers,
@@ -450,10 +523,15 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
                     "n_freq": batch["n_freq"],
                 }
 
-                window_embeddings = process_batch(bert_model, batch, device, target_layer)
+                body_mean = None
+                if store_body_mean:
+                    window_embeddings, body_mean = process_batch(
+                        bert_model, batch, device, target_layer, ablation=ablation, return_body_mean=True)
+                else:
+                    window_embeddings = process_batch(bert_model, batch, device, target_layer, ablation=ablation)
 
                 start_idx = batch_idx * batch_size
-                store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx)
+                store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx, body_mean=body_mean)
 
                 h5_file["progress"].attrs["current_batch_idx"] = batch_idx
                 h5_file["progress"].attrs["processed_count"] = min(
@@ -504,6 +582,16 @@ def main():
                         help="Max fragments to sample per sample (paper cfDNA default: 100000)")
     parser.add_argument("--max_token_length", type=int, default=2048)
     parser.add_argument("--min_flank_token_length", type=int, default=100)
+    parser.add_argument("--ablation", type=str, default="none",
+                        help="Must match the checkpoint's pretraining ablation: "
+                             "none | nocut | eqmask | noflank | nomod")
+    parser.add_argument("--store_body_mean", action="store_true",
+                        help="Also store embeddings/body_mean (mean over body tokens at --target_layer)")
+    parser.add_argument("--presample", type=int, default=None,
+                        help="Draw --n_fragment_per_file fragments from the first PRESAMPLE drawn with "
+                             "--seed (100000 with 10000 reproduces the Fig 4 fragment set)")
+    parser.add_argument("--per_fragment_rng", action="store_true",
+                        help="Seed strand/flank randomness per fragment, so it is the same across models")
 
     args = parser.parse_args()
 
@@ -520,6 +608,10 @@ def main():
         target_layer=args.target_layer,
         max_token_length=args.max_token_length,
         min_flank_token_length=args.min_flank_token_length,
+        ablation=args.ablation,
+        store_body_mean=args.store_body_mean,
+        presample=args.presample,
+        per_fragment_rng=args.per_fragment_rng,
     )
 
 

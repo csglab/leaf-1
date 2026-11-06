@@ -33,6 +33,14 @@ leaf1-extract \
 
 To extract all 13 layers instead of one, drop `--target_layer`. File size scales by ~13x.
 
+For a checkpoint pretrained with `--ablation`, pass the same `--ablation` and run at its training length (`--max_token_length` = the checkpoint's `max_position_embeddings`). Other options:
+
+- `--store_body_mean`: also write `embeddings/body_mean`, the mean over body tokens at `--target_layer` (n, D). Defined the same way for every ablation.
+- `--presample N`: draw `--n_fragment_per_file` fragments from the first N drawn with `--seed`. `--presample 100000 --n_fragment_per_file 10000` gives the Fig 4 fragment set.
+- `--per_fragment_rng`: seed strand and flank trimming per fragment, so the same fragment is processed identically by every model.
+
+For `nocut` the two [CUT] chunks are zeros; for `noflank` the left and right flank chunks are zeros.
+
 ## H5 schema
 
 Output path: `<output_dir>/h5_files/<modality>_<sample_id>.h5`.

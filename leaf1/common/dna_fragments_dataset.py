@@ -15,7 +15,7 @@ import pandas as pd
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerFast
 
-from .get_fragment import initialize_iterable_get_fragment
+from .get_fragment import check_ablation, initialize_iterable_get_fragment, modality_slot_token
 from .modality import resolve_modality_token
 
 
@@ -23,7 +23,8 @@ class DNAFragmentDataset:
     def __init__(self, tokenizer_file, ref_genome_file, n_fragment_file,
                  n_fragment_per_file=1000, max_token_length=1024,
                  min_flank_token_length=100, reshuffle=False, seed=None,
-                 return_token_type_ids=False, return_special_tokens_mask=False):
+                 return_token_type_ids=False, return_special_tokens_mask=False, ablation="none"):
+        self.ablation = check_ablation(ablation)
         self.ref_genome_file = ref_genome_file
         self.total_length = max_token_length
         self.min_flank = min_flank_token_length
@@ -81,6 +82,7 @@ class DNAFragmentDataset:
             self.get_fragment[bed_file] = initialize_iterable_get_fragment(
                 self.tokenizer, bed_file, self.ref_genome_file,
                 self.total_length, self.min_flank, fragment_seed,
+                ablation=self.ablation,
             )
 
         self.total_fragments = total_fragments
@@ -118,7 +120,7 @@ class DNAFragmentDataset:
                 group = self.file_to_group[bed_file]
 
                 tokenized_input = self.tokenizer(
-                    modality + fragment['final_sequence'],
+                    modality_slot_token(modality, self.ablation) + fragment['final_sequence'],
                     return_special_tokens_mask=True,
                     truncation=True,
                     padding='max_length',

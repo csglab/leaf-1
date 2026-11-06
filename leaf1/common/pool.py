@@ -99,3 +99,28 @@ def compute_window_embeddings(embeddings, start_pos, end_pos, num_windows=3):
         [left_pooled, frag_pooled, right_pooled, cut1_tokens, cut2_tokens, cls_tokens, mod_tokens],
         dim=1,
     )
+
+
+def compute_window_embeddings_from_counts(embeddings, n_token_left, n_token_frag, n_token_right,
+                                          num_windows=3):
+    """Same layout as compute_window_embeddings for inputs without [CUT] tokens (nocut).
+    Regions come from the token counts; the two CUT chunks are zeros."""
+    batch_size, seq_len, embed_dim = embeddings.shape
+    device = embeddings.device
+    pos = torch.arange(seq_len, device=device).expand(batch_size, seq_len)
+    lo = 2 + n_token_left.unsqueeze(1)
+    hi = lo + n_token_frag.unsqueeze(1)
+    end = hi + n_token_right.unsqueeze(1)
+    if (n_token_frag <= 0).any():
+        raise ValueError("every row needs at least one body token")
+
+    pooler = AdaptiveMultiWindowPooler(num_windows)
+    left_pooled = pooler(embeddings, (pos >= 2) & (pos < lo))
+    frag_pooled = pooler(embeddings, (pos >= lo) & (pos < hi))
+    right_pooled = pooler(embeddings, (pos >= hi) & (pos < end))
+    zeros = torch.zeros(batch_size, embed_dim, device=device, dtype=embeddings.dtype)
+
+    return torch.cat(
+        [left_pooled, frag_pooled, right_pooled, zeros, zeros, embeddings[:, 0, :], embeddings[:, 1, :]],
+        dim=1,
+    )

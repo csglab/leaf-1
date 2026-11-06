@@ -43,6 +43,7 @@ _EVAL_STRATEGY_KWARG = "eval_strategy" if "eval_strategy" in _TRAINING_ARGS_PARA
 
 from leaf1.common.collator import DataCollatorForDNAFragmentModelingNoDecay
 from leaf1.common.dna_fragments_dataset import DNAFragmentDataset
+from leaf1.common.get_fragment import ABLATIONS
 from leaf1.common.pytorch_dataset import TrainingDNAFragmentDataset
 
 
@@ -79,6 +80,8 @@ def parse_args():
     p.add_argument("--warmup_steps", type=int, default=1000)
     p.add_argument("--mlm_probability", type=float, default=0.15)
     p.add_argument("--cut_mlm_probability", type=float, default=0.30)
+    p.add_argument("--ablation", type=str, default="none", choices=list(ABLATIONS),
+                   help="none | nocut | eqmask ([CUT] masked at --mlm_probability) | noflank | nomod")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n_worker", type=int, default=12)
     # IO. Train/val manifests must be supplied by the user.
@@ -107,7 +110,13 @@ def parse_args():
     p.add_argument("--fp16", action="store_true")
     p.add_argument("--bf16", action="store_true", help="Recommended on H100/A100")
     p.add_argument("--max_grad_norm", type=float, default=1.0)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.ablation == "eqmask":
+        if args.cut_mlm_probability not in (0.30, args.mlm_probability):
+            p.error("--ablation eqmask sets --cut_mlm_probability to --mlm_probability; "
+                    f"got an explicit {args.cut_mlm_probability}")
+        args.cut_mlm_probability = args.mlm_probability
+    return args
 
 
 def build_compute_metrics(tokenizer):
@@ -133,6 +142,10 @@ def build_compute_metrics(tokenizer):
         )['accuracy']
 
         cut_mask = (labels == cut_token_id)
+        # masked sequence tokens only (overall_accuracy also counts [CUT], which nocut doesn't have)
+        noncut_mask = general_mask & ~cut_mask
+        noncut_acc = (metric.compute(predictions=preds[noncut_mask], references=labels[noncut_mask])['accuracy']
+                      if noncut_mask.sum() > 0 else None)
         cut_pred = preds[general_mask] == cut_token_id
         cut_true = labels[general_mask] == cut_token_id
 
@@ -197,6 +210,7 @@ def build_compute_metrics(tokenizer):
 
         return {
             "overall_accuracy": overall_acc,
+            "noncut_accuracy": noncut_acc,
             "cut_precision": cut_precision,
             "cut_recall": cut_recall,
             "cut_mcc": cut_mcc,
@@ -249,6 +263,7 @@ def main():
         "return_token_type_ids": False,
         "return_special_tokens_mask": True,
         "n_shards": args.n_worker,
+        "ablation": args.ablation,
     }
 
     validation_data_args = {
@@ -262,12 +277,14 @@ def main():
         "reshuffle": True,
         "return_token_type_ids": False,
         "return_special_tokens_mask": True,
+        "ablation": args.ablation,
     }
 
     model_id = (
         f"{args.run_tag}_L{args.n_layers}_H{args.n_heads}_D{dim}_FF{args.ffn_mult}"
         f"_BS{args.batch_size}_GA{args.grad_accum}_SEQ{args.seq_len}_VOC{args.vocab_size}"
         f"_LR{args.learning_rate}_WD{args.weight_decay}_SCHED_{args.lr_scheduler}"
+        + (f"_ABL{args.ablation}" if args.ablation != "none" else "")
     )
     out_dir = os.path.join(args.output_root, model_id)
     log_dir = os.path.join(args.log_root, model_id)

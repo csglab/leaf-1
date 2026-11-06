@@ -18,6 +18,28 @@ import pandas as pd
 from transformers import PreTrainedTokenizerFast
 
 
+# Pretraining ablations. Each one changes a single design element relative to "none"
+# (the released LEAF-1 input):
+#   nocut   - no [CUT] tokens; left + body + right are tokenized as one string, so BPE
+#             boundaries don't mark the cleavage sites either
+#   eqmask  - [CUT] masked at the base rate (collator only, input unchanged)
+#   noflank - no flanking sequence: [CLS] [MOD] [CUT] body [CUT]
+#   nomod   - modality token replaced by the same placeholder for every sample
+ABLATIONS = ("none", "nocut", "eqmask", "noflank", "nomod")
+NOMOD_PLACEHOLDER = "[SEP]"   # special token, never used in single-sequence inputs
+
+
+def check_ablation(ablation):
+    if ablation not in ABLATIONS:
+        raise ValueError(f"Unknown ablation {ablation!r}; expected one of {ABLATIONS}")
+    return ablation
+
+
+def modality_slot_token(real_modality_token, ablation):
+    """Token for the modality slot: the real one, or the placeholder for nomod."""
+    return NOMOD_PLACEHOLDER if ablation == "nomod" else real_modality_token
+
+
 def read_fai_file(fai_file):
     return pd.read_csv(fai_file, sep='\t', header=None, usecols=[0, 1], names=['chr', 'length'])
 
@@ -50,7 +72,8 @@ def get_bed_line(bed_file, offset, line_number):
     raise ValueError(f"Line number {line_number} is out of the file's range.")
 
 
-def process_line(line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length):
+def process_line(line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length,
+                 ablation="none"):
     CONST_SEQ_TO_TOKEN_RATIO = 7
     adjusted_min_flank = min_flank_token_length * CONST_SEQ_TO_TOKEN_RATIO
     adjusted_max_token_length = max_token_length * CONST_SEQ_TO_TOKEN_RATIO
@@ -69,6 +92,10 @@ def process_line(line, chr_lengths, reverse_complemented, max_token_length, min_
             f"(max_token_length={max_token_length} * {CONST_SEQ_TO_TOKEN_RATIO}). "
             "Filter long fragments during BED preprocessing or increase --max_token_length."
         )
+
+    if ablation == "noflank":
+        # window = fragment, no flanking bases
+        return chr, start, end, start, end, 0, frag_length
 
     remaining_length = adjusted_max_token_length - frag_length
     left_flank_min = min(start, adjusted_min_flank)
@@ -138,7 +165,130 @@ def get_sequence(ref_genome, bed_line, reverse_complemented):
     return sequence
 
 
-def process_sequence(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, rng):
+def _flank_removal(current_token_count, max_token_length, len_left, len_frag, len_right,
+                   min_flank_token_length, rng):
+    """Number of tokens to drop from the left and right flanks so the sequence fits.
+    Moved out of process_sequence unchanged (same rng draws)."""
+    tokenized_left_len, tokenized_right_len = len_left, len_right
+    excess_tokens = current_token_count - max_token_length
+
+    max_left_remove = max(0, tokenized_left_len - min_flank_token_length)
+    max_right_remove = max(0, tokenized_right_len - min_flank_token_length)
+    total_removable = min(excess_tokens, max_left_remove + max_right_remove)
+
+    if total_removable < excess_tokens:
+        raise ValueError(
+            "Insufficient room for token removal: "
+            f"Current Total Token Length: {current_token_count}, "
+            f"Max Allowed Token Length: {max_token_length}, "
+            f"Excess Tokens: {excess_tokens}, "
+            f"Left Flank Token Length: {tokenized_left_len}, "
+            f"Fragment Token Length: {len_frag}, "
+            f"Right Flank Token Length: {tokenized_right_len}, "
+            f"Max Left Removable: {max_left_remove}, "
+            f"Max Right Removable: {max_right_remove}, "
+            f"Total Removable: {total_removable}."
+        )
+
+    if max_left_remove > 0 and max_right_remove > 0:
+        # Bernoulli split between flanks; clamp at each flank's maximum.
+        p = rng.uniform()
+        bernoulli_vector = rng.binomial(1, p, total_removable)
+        left_cumsum = np.cumsum(bernoulli_vector)
+        right_cumsum = np.cumsum(1 - bernoulli_vector)
+
+        left_remove_vector = np.where(left_cumsum <= max_left_remove, left_cumsum, max_left_remove)
+        right_remove_vector = np.where(right_cumsum <= max_right_remove, right_cumsum, max_right_remove)
+
+        total_remove_vector = left_remove_vector + right_remove_vector
+        if total_remove_vector[-1] >= total_removable:
+            min_index = np.where(total_remove_vector >= total_removable)[0][0]
+            left_remove = left_remove_vector[min_index]
+            right_remove = right_remove_vector[min_index]
+        else:
+            left_remove = left_remove_vector[-1]
+            right_remove = right_remove_vector[-1]
+            if left_remove == max_left_remove and right_remove == max_right_remove:
+                raise ValueError("Unreachable: both flanks maxed out before total_removable reached.")
+            elif left_remove == max_left_remove:
+                right_remove = min(max_right_remove, total_removable - left_remove)
+            elif right_remove == max_right_remove:
+                left_remove = min(max_left_remove, total_removable - right_remove)
+    elif max_left_remove > 0:
+        left_remove = min(max_left_remove, total_removable)
+        right_remove = 0
+    elif max_right_remove > 0:
+        right_remove = min(max_right_remove, total_removable)
+        left_remove = 0
+    else:
+        left_remove = right_remove = 0
+
+    return left_remove, right_remove
+
+
+def _token_bases(token):
+    """Reference bases covered by a token. [PAD] stands for one N, [UNK] for one IUPAC base."""
+    return 1 if token in ('[PAD]', '[UNK]') else len(token)
+
+
+def _process_sequence_nocut(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_length,
+                            min_flank_token_length, rng):
+    """nocut: same window and flank trimming as process_sequence, but no [CUT] tokens and a single
+    tokenization of left + body + right. Body tokens are found from base offsets; a token that
+    straddles a boundary counts as body."""
+    tokenized_left = tokenizer.tokenize(seq[:adj_frag_start].replace('N', '[PAD]'), verbose=False)
+    tokenized_frag = tokenizer.tokenize(seq[adj_frag_start:adj_frag_end].replace('N', '[PAD]'), verbose=False)
+    tokenized_right = tokenizer.tokenize(seq[adj_frag_end:].replace('N', '[PAD]'), verbose=False)
+
+    # trim flanks the same way as process_sequence
+    current_token_count = len(tokenized_left) + len(tokenized_frag) + len(tokenized_right) + 2
+    left_bp_cut = right_bp_cut = 0
+    if current_token_count > max_token_length:
+        left_remove, right_remove = _flank_removal(
+            current_token_count, max_token_length, len(tokenized_left), len(tokenized_frag),
+            len(tokenized_right), min_flank_token_length, rng)
+        left_bp_cut = sum(_token_bases(t) for t in tokenized_left[:left_remove])
+        right_bp_cut = sum(_token_bases(t) for t in tokenized_right[len(tokenized_right) - right_remove:]) if right_remove else 0
+    window = seq[left_bp_cut:len(seq) - right_bp_cut]
+    body_lo, body_hi = adj_frag_start - left_bp_cut, adj_frag_end - left_bp_cut
+
+    # merges across the boundaries can change the token count; if it still overflows, drop bases
+    # from the longer flank and re-tokenize
+    while True:
+        tokens = tokenizer.tokenize(window.replace('N', '[PAD]'), verbose=False)
+        spans, pos = [], 0
+        for tok in tokens:
+            spans.append((pos, pos + _token_bases(tok)))
+            pos += _token_bases(tok)
+        assert pos == len(window), "token bases do not reconstruct the window"
+        n_left = sum(1 for lo, hi in spans if hi <= body_lo)
+        n_right = sum(1 for lo, hi in spans if lo >= body_hi)
+        excess = len(tokens) + 2 - max_token_length
+        if excess <= 0:
+            break
+        if n_left == 0 and n_right == 0:
+            raise ValueError("nocut: body alone exceeds max_token_length")
+        if n_left >= n_right:
+            cut = sum(_token_bases(t) for t in tokens[:min(excess, n_left)])
+            window, body_lo, body_hi = window[cut:], body_lo - cut, body_hi - cut
+        else:
+            cut = sum(_token_bases(t) for t in tokens[len(tokens) - min(excess, n_right):])
+            window = window[:len(window) - cut]
+    n_frag = len(tokens) - n_left - n_right
+
+    pad_tokens = [tokenizer.pad_token] * (max_token_length - len(tokens) - 2)
+    processed_seq = ''.join(tokens + pad_tokens)
+
+    n_count = processed_seq.count('[PAD]')
+    n_relative_frequency = n_count / len(processed_seq) if processed_seq else 0
+    return processed_seq, n_relative_frequency, n_left, n_frag, n_right
+
+
+def process_sequence(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, rng,
+                     ablation="none"):
+    if ablation == "nocut":
+        return _process_sequence_nocut(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_length,
+                                       min_flank_token_length, rng)
     tokenized_left = tokenizer.tokenize(seq[:adj_frag_start].replace('N', '[PAD]'), verbose=False)
     tokenized_frag = tokenizer.tokenize(("[CUT]" + seq[adj_frag_start:adj_frag_end] + "[CUT]").replace('N', '[PAD]'), verbose=False)
     tokenized_right = tokenizer.tokenize(seq[adj_frag_end:].replace('N', '[PAD]'), verbose=False)
@@ -153,58 +303,9 @@ def process_sequence(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_len
         pad_tokens = [tokenizer.pad_token] * pad_token_count
         processed_seq = ''.join(tokenized_left + tokenized_frag + tokenized_right + pad_tokens)
     else:
-        excess_tokens = current_token_count - max_token_length
-
-        max_left_remove = max(0, len(tokenized_left) - min_flank_token_length)
-        max_right_remove = max(0, len(tokenized_right) - min_flank_token_length)
-        total_removable = min(excess_tokens, max_left_remove + max_right_remove)
-
-        if total_removable < excess_tokens:
-            raise ValueError(
-                "Insufficient room for token removal: "
-                f"Current Total Token Length: {current_token_count}, "
-                f"Max Allowed Token Length: {max_token_length}, "
-                f"Excess Tokens: {excess_tokens}, "
-                f"Left Flank Token Length: {len(tokenized_left)}, "
-                f"Fragment Token Length: {len(tokenized_frag)}, "
-                f"Right Flank Token Length: {len(tokenized_right)}, "
-                f"Max Left Removable: {max_left_remove}, "
-                f"Max Right Removable: {max_right_remove}, "
-                f"Total Removable: {total_removable}."
-            )
-
-        if max_left_remove > 0 and max_right_remove > 0:
-            # Bernoulli split between flanks; clamp at each flank's maximum.
-            p = rng.uniform()
-            bernoulli_vector = rng.binomial(1, p, total_removable)
-            left_cumsum = np.cumsum(bernoulli_vector)
-            right_cumsum = np.cumsum(1 - bernoulli_vector)
-
-            left_remove_vector = np.where(left_cumsum <= max_left_remove, left_cumsum, max_left_remove)
-            right_remove_vector = np.where(right_cumsum <= max_right_remove, right_cumsum, max_right_remove)
-
-            total_remove_vector = left_remove_vector + right_remove_vector
-            if total_remove_vector[-1] >= total_removable:
-                min_index = np.where(total_remove_vector >= total_removable)[0][0]
-                left_remove = left_remove_vector[min_index]
-                right_remove = right_remove_vector[min_index]
-            else:
-                left_remove = left_remove_vector[-1]
-                right_remove = right_remove_vector[-1]
-                if left_remove == max_left_remove and right_remove == max_right_remove:
-                    raise ValueError("Unreachable: both flanks maxed out before total_removable reached.")
-                elif left_remove == max_left_remove:
-                    right_remove = min(max_right_remove, total_removable - left_remove)
-                elif right_remove == max_right_remove:
-                    left_remove = min(max_left_remove, total_removable - right_remove)
-        elif max_left_remove > 0:
-            left_remove = min(max_left_remove, total_removable)
-            right_remove = 0
-        elif max_right_remove > 0:
-            right_remove = min(max_right_remove, total_removable)
-            left_remove = 0
-        else:
-            left_remove = right_remove = 0
+        left_remove, right_remove = _flank_removal(
+            current_token_count, max_token_length, len(tokenized_left), len(tokenized_frag),
+            len(tokenized_right), min_flank_token_length, rng)
 
         tokenized_left = tokenized_left[left_remove:]
         tokenized_right = tokenized_right[:-right_remove] if right_remove > 0 else tokenized_right
@@ -219,8 +320,10 @@ def process_sequence(seq, adj_frag_start, adj_frag_end, tokenizer, max_token_len
 
 
 def random_access_get_fragment(tokenizer, bed_file, ref_genome, line_number,
-                                max_token_length=1024, min_flank_token_length=100, seed=None):
+                                max_token_length=1024, min_flank_token_length=100, seed=None,
+                                ablation="none"):
     """One-shot version: open index + fai for every call. Use the iterable variant for throughput."""
+    check_ablation(ablation)
     rng = np.random.default_rng(seed)
 
     index_file = f"{bed_file}.index"
@@ -239,14 +342,16 @@ def random_access_get_fragment(tokenizer, bed_file, ref_genome, line_number,
     reverse_complemented = rng.uniform() < 0.5
 
     chr, start_adj, end_adj, frag_start, frag_end, adj_frag_start, adj_frag_end = process_line(
-        bed_line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length
+        bed_line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length,
+        ablation=ablation,
     )
 
     bed_line_for_bedtools = f"{chr}\t{start_adj}\t{end_adj}\n"
     sequence = get_sequence(ref_genome, bed_line_for_bedtools, reverse_complemented)
 
     final_sequence, n_relative_frequency, n_token_left, n_token_frag, n_token_right = process_sequence(
-        sequence, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, rng
+        sequence, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, rng,
+        ablation=ablation,
     )
 
     return {
@@ -265,12 +370,20 @@ def random_access_get_fragment(tokenizer, bed_file, ref_genome, line_number,
 
 
 def initialize_iterable_get_fragment(tokenizer, bed_file, ref_genome,
-                                      max_token_length=1024, min_flank_token_length=100, seed=None):
+                                      max_token_length=1024, min_flank_token_length=100, seed=None,
+                                      ablation="none", per_fragment_rng=False):
     """Return a closure that processes a single BED line by line number.
 
     The .fai chromosome-length table and .bed.index byte-offset table are loaded once
     here and captured by the inner function for fast repeated lookups.
+
+    per_fragment_rng: seed the strand and flank-trim draws on (seed, line_number) instead of one
+    shared stream, so a fragment gets the same strand in every model and any worker layout.
+    Off by default.
     """
+    check_ablation(ablation)
+    if per_fragment_rng and seed is None:
+        raise ValueError("per_fragment_rng requires a seed")
     rng = np.random.default_rng(seed)
 
     index_file = f"{bed_file}.index"
@@ -288,10 +401,12 @@ def initialize_iterable_get_fragment(tokenizer, bed_file, ref_genome,
             index_line_number, offset = read_index_file(index_df, line_number)
             bed_line = get_bed_line(bed_file, offset, line_number - index_line_number)
 
-            reverse_complemented = rng.uniform() < 0.5
+            frag_rng = np.random.default_rng([seed, int(line_number)]) if per_fragment_rng else rng
+            reverse_complemented = frag_rng.uniform() < 0.5
 
             chr, start_adj, end_adj, frag_start, frag_end, adj_frag_start, adj_frag_end = process_line(
-                bed_line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length
+                bed_line, chr_lengths, reverse_complemented, max_token_length, min_flank_token_length,
+                ablation=ablation,
             )
 
             bed_line_for_bedtools = f"{chr}\t{start_adj}\t{end_adj}\n"
@@ -299,7 +414,8 @@ def initialize_iterable_get_fragment(tokenizer, bed_file, ref_genome,
             raw_fragment_dna = sequence[adj_frag_start:adj_frag_end]
 
             final_sequence, n_relative_frequency, n_token_left, n_token_frag, n_token_right = process_sequence(
-                sequence, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, rng
+                sequence, adj_frag_start, adj_frag_end, tokenizer, max_token_length, min_flank_token_length, frag_rng,
+                ablation=ablation,
             )
 
             return {
