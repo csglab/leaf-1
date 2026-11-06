@@ -1,0 +1,30 @@
+{
+  "activation": "gelu",
+  "architectures": [
+    "DistilBertForMaskedLM"
+  ],
+  "attention_dropout": 0.1,
+  "bos_token_id": 1,
+  "dim": 768,
+  "dropout": 0.1,
+  "eos_token_id": 2,
+  "hidden_dim": 3072,
+  "initializer_range": 0.02,
+  "leaf1_ablation": "none",
+  "leaf1_max_token_length": 2048,
+  "leaf1_min_flank_token_length": 100,
+  "leaf1_model": "leaf1-nocristiano",
+  "max_position_embeddings": 2048,
+  "model_max_length": 2048,
+  "model_type": "distilbert",
+  "n_heads": 12,
+  "n_layers": 12,
+  "pad_token_id": 3,
+  "qa_dropout": 0.1,
+  "sep_token_id": 2,
+  "seq_classif_dropout": 0.2,
+  "sinusoidal_pos_embds": false,
+  "torch_dtype": "float32",
+  "transformers_version": "4.37.1",
+  "vocab_size": 4099
+}

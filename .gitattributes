@@ -5,3 +5,5 @@ checkpoint/*.bin filter=lfs diff=lfs merge=lfs -text
 checkpoint/trainer_state.json filter=lfs diff=lfs merge=lfs -text
 mil_checkpoint/**/*.pt filter=lfs diff=lfs merge=lfs -text
 assets/refseq.genome.fa filter=lfs diff=lfs merge=lfs -text
+encoder_checkpoints/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+encoder_checkpoints/**/trainer_state.json filter=lfs diff=lfs merge=lfs -text
