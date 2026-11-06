@@ -36,9 +36,10 @@ for k in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
 
 # Ensure leaf1.* is importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from leaf1.common.get_fragment import check_ablation, initialize_iterable_get_fragment, modality_slot_token
+from leaf1.common.get_fragment import ABLATIONS, check_ablation, initialize_iterable_get_fragment, modality_slot_token
 from leaf1.common.modality import resolve_modality_token
 from leaf1.common.pool import compute_window_embeddings, compute_window_embeddings_from_counts
+from leaf1.infer import models as leaf1_models
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -351,9 +352,10 @@ def store_batch_data(h5_file, window_embeddings, batch_metadata, start_idx, body
 def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, index, output_dir,
                        tokenizer_file, ref_genome_file,
                        batch_size=32, seed=42, target_layer=None,
-                       max_token_length=2048, min_flank_token_length=100, ablation="none",
+                       max_token_length=None, min_flank_token_length=None, ablation=None,
                        store_body_mean=False, presample=None, per_fragment_rng=False):
-    check_ablation(ablation)
+    # ablation / max_token_length / min_flank_token_length: None = take them from the
+    # checkpoint (leaf1_* keys in config.json), or the released defaults if it has none.
     if store_body_mean and target_layer is None:
         raise ValueError("--store_body_mean requires --target_layer")
     output_dir = Path(output_dir)
@@ -380,6 +382,16 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
     # hidden dim and layer count (supports scaling-sweep models).
     from transformers import DistilBertConfig
     model_config = DistilBertConfig.from_pretrained(bert_checkpoint)
+    leaf1_models.check_weights_present(bert_checkpoint)
+    leaf1_model, ablation, max_token_length, min_flank_token_length = leaf1_models.resolve_input(
+        model_config, bert_checkpoint, ablation=ablation, max_token_length=max_token_length,
+        min_flank_token_length=min_flank_token_length)
+    check_ablation(ablation)
+    if leaf1_model in leaf1_models.MODELS:
+        leaf1_models.check_md5(leaf1_model, bert_checkpoint)
+    if leaf1_model is not None:
+        print(f"Checkpoint is {leaf1_model}: ablation={ablation} max_token_length={max_token_length} "
+              f"min_flank_token_length={min_flank_token_length} (from its config.json)")
     embed_dim = model_config.dim
     num_bert_layers = model_config.n_layers
     window_embed_dim = window_embed_dim_for(embed_dim)
@@ -421,6 +433,10 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             if stored_ablation != ablation:
                 raise ValueError(f"Ablation mismatch: stored {stored_ablation!r} vs current {ablation!r}")
             meta = f["metadata"].attrs if "metadata" in f else {}
+            if meta.get("leaf1_model", None) != leaf1_model:
+                raise ValueError(f"Model mismatch: existing H5 {h5_path} was written by "
+                                 f"{meta.get('leaf1_model', 'an unstamped checkpoint')!r}, current is "
+                                 f"{leaf1_model or 'an unstamped checkpoint'!r}")
             stored = (int(meta.get("presample", 0)), bool(meta.get("per_fragment_rng", False)))
             if stored != (int(presample or 0), bool(per_fragment_rng)):
                 raise ValueError(f"(presample, per_fragment_rng) mismatch: stored {stored} vs current "
@@ -466,6 +482,8 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             "target_layer": target_layer,
         }
         # only written when set, so default H5 files are unchanged
+        if leaf1_model is not None:
+            dataset_info["leaf1_model"] = leaf1_model
         if ablation != "none":
             dataset_info["ablation"] = ablation
         if store_body_mean:
@@ -474,7 +492,7 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             dataset_info["presample"] = int(presample)
         if per_fragment_rng:
             dataset_info["per_fragment_rng"] = True
-        if ablation != "none" or store_body_mean or presample or per_fragment_rng:
+        if leaf1_model is not None or ablation != "none" or store_body_mean or presample or per_fragment_rng:
             dataset_info["max_token_length"] = int(max_token_length)
         create_h5_structure(
             h5_file, len(dataset), dataset_info,
@@ -562,8 +580,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Extract LEAF-1 window-pooled per-fragment embeddings from one sample"
     )
-    parser.add_argument("--bert_checkpoint", type=str, required=True,
-                        help="Path to a HuggingFace DistilBertForMaskedLM checkpoint dir")
+    ckpt = parser.add_mutually_exclusive_group()
+    ckpt.add_argument("--model", type=str, default=None, choices=leaf1_models.model_names(),
+                      help="Named checkpoint shipped with the repo; sets the checkpoint and its input "
+                           f"settings together. Default: {leaf1_models.DEFAULT_MODEL} (the released model). "
+                           "See encoder_checkpoints/README.md.")
+    ckpt.add_argument("--bert_checkpoint", type=str, default=None,
+                      help="Path to a HuggingFace DistilBertForMaskedLM checkpoint dir (instead of --model)")
     parser.add_argument("--n_fragment_file", type=str, required=True,
                         help="CSV manifest: sample_id,modality,bed_file,n_fragment,group")
     parser.add_argument("--index", type=int, required=True,
@@ -580,11 +603,16 @@ def main():
                         help="Single layer to extract (paper uses 4). Omit to store all 13 layers.")
     parser.add_argument("--n_fragment_per_file", type=int, default=100000,
                         help="Max fragments to sample per sample (paper cfDNA default: 100000)")
-    parser.add_argument("--max_token_length", type=int, default=2048)
-    parser.add_argument("--min_flank_token_length", type=int, default=100)
-    parser.add_argument("--ablation", type=str, default="none",
+    # These three default to None so a value given on the command line can be checked
+    # against the checkpoint's own settings; unset, they come from the checkpoint
+    # (or are 2048 / 100 / none for a checkpoint without leaf1_* config keys).
+    parser.add_argument("--max_token_length", type=int, default=None,
+                        help="Default: from the checkpoint, else 2048")
+    parser.add_argument("--min_flank_token_length", type=int, default=None,
+                        help="Default: from the checkpoint, else 100")
+    parser.add_argument("--ablation", type=str, default=None, choices=list(ABLATIONS),
                         help="Must match the checkpoint's pretraining ablation: "
-                             "none | nocut | eqmask | noflank | nomod")
+                             "none | nocut | eqmask | noflank | nomod. Default: from the checkpoint, else none")
     parser.add_argument("--store_body_mean", action="store_true",
                         help="Also store embeddings/body_mean (mean over body tokens at --target_layer)")
     parser.add_argument("--presample", type=int, default=None,
@@ -594,6 +622,21 @@ def main():
                         help="Seed strand/flank randomness per fragment, so it is the same across models")
 
     args = parser.parse_args()
+
+    if args.bert_checkpoint is None:
+        name = args.model or leaf1_models.DEFAULT_MODEL
+        path = leaf1_models.model_path(name)
+        if not (path / "config.json").is_file():
+            raise SystemExit(f"--model {name}: no checkpoint at {path}. --model needs a clone of the "
+                             "repo (pip install -e .); otherwise pass --bert_checkpoint.")
+        leaf1_models.check_weights_present(path)
+        from transformers import DistilBertConfig
+        stamped, _ = leaf1_models.stamped_input(DistilBertConfig.from_pretrained(str(path)))
+        if stamped != (None if name == leaf1_models.DEFAULT_MODEL else name):
+            raise SystemExit(f"--model {name}: {path} holds {stamped or 'an unstamped checkpoint'}")
+        if stamped is None:   # stamped checkpoints are md5-checked in evaluate_bed_file
+            leaf1_models.check_md5(name, path)
+        args.bert_checkpoint = str(path)
 
     evaluate_bed_file(
         bert_checkpoint=args.bert_checkpoint,

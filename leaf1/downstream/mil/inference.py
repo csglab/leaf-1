@@ -316,10 +316,52 @@ def _read_group_attrs(h5):
     return out
 
 
+def h5_encoder(h5):
+    """Encoder that wrote an H5: its ``leaf1_model`` metadata attr.
+
+    leaf1-extract writes it for every checkpoint under ``encoder_checkpoints/``; H5s from the
+    released model (and from any checkpoint without leaf1_* config keys) don't have
+    it and count as ``leaf1``. An ablation attr without leaf1_model means an
+    unstamped ablation checkpoint, reported as ``unstamped-<ablation>``.
+    """
+    meta = h5["metadata"].attrs if "metadata" in h5 else {}
+    name = meta.get("leaf1_model", None)
+    if name is not None:
+        return name.decode() if isinstance(name, bytes) else str(name)
+    abl = meta.get("ablation", "none")
+    abl = abl.decode() if isinstance(abl, bytes) else str(abl)
+    return "leaf1" if abl == "none" else f"unstamped-{abl}"
+
+
+def check_encoders(hdf5_files, encoder_model):
+    """Refuse H5s written by a different encoder than the classifier was fit on."""
+    bad = {}
+    for path in hdf5_files:
+        with h5py.File(path, "r") as h5:
+            enc = h5_encoder(h5)
+        if enc != encoder_model:
+            bad.setdefault(enc, []).append(str(path))
+    if bad:
+        detail = "; ".join(f"{len(v)} from {k!r} (e.g. {v[0]})" for k, v in bad.items())
+        raise ValueError(
+            f"The MIL classifier expects embeddings from {encoder_model!r}, but got {detail}. "
+            "The released mil_checkpoint/ classifiers were fit on the released LEAF-1 encoder "
+            "(leaf1-extract --model leaf1) and are not valid for other encoders. If your classifier "
+            "was fit on another encoder's embeddings, pass that encoder exactly as shown above, "
+            f"e.g. --encoder_model {next(iter(bad))}")
+
+
 def run_inference(checkpoint_dir, hdf5_files, output_dir, *, all_folds=False,
-                  segments=None, frags_per_bag=100000, seed=42, device=None):
-    """Score every H5 in ``hdf5_files`` and write ``sample_summary.csv``."""
+                  segments=None, frags_per_bag=100000, seed=42, device=None,
+                  encoder_model="leaf1"):
+    """Score every H5 in ``hdf5_files`` and write ``sample_summary.csv``.
+
+    ``encoder_model``: the leaf1-extract model whose embeddings the classifier was fit on
+    (``leaf1`` for the released classifiers). Every H5 has to come from it.
+    """
     import csv
+
+    check_encoders(hdf5_files, encoder_model)
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     models, seg_idx, seg_str = load_ensemble(
@@ -402,6 +444,9 @@ def parse_args(argv=None):
     p.add_argument("--frags_per_bag", type=int, default=100000,
                    help="Fragments sampled per sample (default: 100000).")
     p.add_argument("--seed", type=int, default=42, help="Fragment-sampling seed.")
+    p.add_argument("--encoder_model", default="leaf1",
+                   help="leaf1-extract --model whose embeddings the classifier was fit on. Every H5 "
+                        "must come from it. Default: leaf1 (the released classifiers).")
     return p.parse_args(argv)
 
 
@@ -416,7 +461,7 @@ def main(argv=None):
     run_inference(
         args.mil_checkpoint, hdf5_files, args.output_dir,
         all_folds=args.all_folds, segments=args.segments,
-        frags_per_bag=args.frags_per_bag, seed=args.seed,
+        frags_per_bag=args.frags_per_bag, seed=args.seed, encoder_model=args.encoder_model,
     )
 
 
