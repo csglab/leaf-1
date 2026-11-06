@@ -14,6 +14,11 @@ leaf1-mil-predict --mil_checkpoint mil_checkpoint/cfdna/cancer_vs_healthy \
                   --output_dir results/
 ```
 
+These classifiers were fit on embeddings from the released encoder (`checkpoint/`,
+`leaf1-extract --model leaf1`) and are not valid for the other encoders in
+[`encoder_checkpoints/`](../encoder_checkpoints). `leaf1-mil-predict` checks each H5's `leaf1_model`
+metadata and stops if it names another encoder.
+
 Payload files (`*.pt`) are tracked with Git LFS. After cloning:
 
 ```bash

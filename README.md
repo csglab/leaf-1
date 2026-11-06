@@ -71,6 +71,7 @@ leaf-1/
 ├── checkpoint/                     # frozen LEAF-1 encoder, Git LFS-backed
 │   ├── README.md
 │   └── model.safetensors           # LEAF-1 weights, Git LFS
+├── encoder_checkpoints/            # additional encoders for leaf1-extract --model (Git LFS, not fetched by default)
 ├── mil_checkpoint/                 # fitted MIL classifier ensembles, Git LFS-backed
 │   └── cfdna/<task>/F0..F4/inner_fold_0..4/{checkpoint.pt, norm_stats.pt}
 └── assets/                         # reference assets
@@ -174,6 +175,12 @@ corresponds to the legacy internal-model LEAF-1 encoder used for the cfDNA
 layer-4 manuscript runs. See [`checkpoint/README.md`](checkpoint/README.md) for
 the expected files and LFS notes.
 
+Additional encoders from the manuscript revision (flank-free models with seeds 42 and 43, and a
+model pretrained without the Cristiano et al. cfDNA samples) are in `encoder_checkpoints/`. Select one with
+`leaf1-extract --model <name>`; each name sets the checkpoint and its matching input format together.
+They are not fetched by a plain clone or by the `git lfs pull` above. See
+[`encoder_checkpoints/README.md`](encoder_checkpoints/README.md).
+
 ## MIL classifier checkpoints
 
 The fitted gated-attention MIL classifiers — the sample-level heads for the cfDNA
@@ -194,6 +201,7 @@ cohort inputs and paper-scale generated outputs are not tracked:
 | GRCh38 reference FASTA + `.fai` | Tracked under `assets/` with Git LFS for the FASTA |
 | hg38 blacklist BED | Tracked at `assets/hg38-blacklist.v2.bed.gz` |
 | Pretrained LEAF-1 encoder checkpoint | Tracked under `checkpoint/` with Git LFS |
+| Additional revision encoders (`--model`) | Tracked under `encoder_checkpoints/` with Git LFS, fetched on request |
 | Fitted MIL classifier ensembles | Tracked under `mil_checkpoint/` with Git LFS (15 cfDNA tasks × 5 outer × 5 inner folds) |
 | Raw cohort fragment files | Access through the source cohorts or controlled-access process; not redistributed here |
 | Paper-scale per-fragment embedding H5s | Generated locally from authorized cohort access using this repo and the released checkpoint; not redistributed here |
@@ -393,6 +401,11 @@ leaf1-mil-predict \
 This averages the nested-CV ensemble and writes `sample_summary.csv`
 (`sample_id, group, pred_prob, pred_logit`). `--all_folds` uses all 25 fold
 models, appropriate for an external cohort.
+
+The released classifiers were fit on embeddings from the released encoder
+(`leaf1-extract --model leaf1`, the default). `leaf1-mil-predict` stops if an H5
+was written by another encoder in `encoder_checkpoints/` (H5 files without a
+`leaf1_model` tag count as `leaf1`).
 
 Configuration reference, sweep launcher, and tuning notes:
 [`leaf1/downstream/mil/README.md`](leaf1/downstream/mil/README.md).

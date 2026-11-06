@@ -10,7 +10,7 @@ Encoders from the manuscript revision, next to the released model in
 | `leaf1-noflank-s43` | `encoder_checkpoints/leaf1-noflank-s43/` | `[CLS] [MOD] [CUT] body [CUT]`, 512 tokens | Same as above, seed 43 | `9b3ed5b1e4ac4fb2ec9ea335b97b5898` |
 | `leaf1-nocristiano` | `encoder_checkpoints/leaf1-nocristiano/` | Same as `leaf1` | Released recipe without the Cristiano et al. cfDNA samples; 104,500 updates (23,500 at batch 4,088 + 81,000 at batch 768), stopped once validation loss reached the released model's | `6a8122f4eb3bd64c903cb930483574bb` |
 
-The manuscript results use `leaf1`. Leaving out `--model` gives `leaf1`, so existing
+The main results in the manuscript use `leaf1`. Leaving out `--model` gives `leaf1`, so existing
 commands are unchanged.
 
 ## Fetching the weights
@@ -71,8 +71,14 @@ Its H5 files get no `leaf1_model` attribute, so they are unchanged.
 The fitted classifiers in [`../mil_checkpoint/`](../mil_checkpoint) were trained on
 `leaf1` embeddings and are not valid for any other encoder, including
 `leaf1-nocristiano`. `leaf1-mil-predict` checks the `leaf1_model` attribute of every
-H5 and stops if it isn't `leaf1`. If you fit your own classifier on another model's
-embeddings, pass `--encoder_model <name>` when scoring.
+H5 and stops if it names another encoder. If you fit your own classifier on another
+model's embeddings, pass `--encoder_model <name>` when scoring.
+
+The check relies on that attribute. H5 files without it (written by the released
+model, by earlier versions of `leaf1-extract`, or from your own checkpoints) count as
+`leaf1`, so keep embeddings from different encoders in separate output directories.
+`scripts/extract_embeddings.sh` skips any completed H5 already in the output directory,
+whichever model wrote it.
 
 ## Files
 

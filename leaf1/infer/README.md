@@ -33,7 +33,28 @@ leaf1-extract \
 
 To extract all 13 layers instead of one, drop `--target_layer`. File size scales by ~13x.
 
-For a checkpoint pretrained with `--ablation`, pass the same `--ablation` and run at its training length (`--max_token_length` = the checkpoint's `max_position_embeddings`). Other options:
+## Choosing the encoder
+
+`--model` selects a checkpoint shipped with the repo, together with the input format it was pretrained on:
+
+| `--model` | Input |
+|---|---|
+| `leaf1` (default) | released model, `[CLS] [MOD] left [CUT] body [CUT] right`, 2048 tokens |
+| `leaf1-noflank-s42`, `leaf1-noflank-s43` | no flanks, `[CLS] [MOD] [CUT] body [CUT]`, 512 tokens |
+| `leaf1-nocristiano` | pretrained without the Cristiano cfDNA samples; same input as `leaf1` |
+
+```bash
+leaf1-extract --model leaf1-noflank-s42 --n_fragment_file /path/to/manifest.csv --index 0 \
+  --output_dir /path/to/output_dir --target_layer 4 --n_fragment_per_file 100000
+```
+
+Leaving out `--model` gives `leaf1`, so the commands above are unchanged. `--bert_checkpoint <dir>` still works for any checkpoint dir; the two flags are mutually exclusive. Details, provenance and how to fetch the weights: [`encoder_checkpoints/README.md`](../../encoder_checkpoints/README.md).
+
+The checkpoints under `encoder_checkpoints/` carry their input settings in `config.json` (`leaf1_ablation`, `leaf1_max_token_length`, `leaf1_min_flank_token_length`), so `--ablation`, `--max_token_length` and `--min_flank_token_length` are set from the checkpoint whether it is selected with `--model` or `--bert_checkpoint`. Giving one of them with a different value is an error, because a model fed a different input format gives wrong embeddings without any other sign. The released `checkpoint/` is recognised by the md5 of its weights and held to its own format (`none`, 2048, 100) the same way. The model name is written to the H5 `metadata` as `leaf1_model` (not written for `leaf1`, so its H5 files are unchanged).
+
+## Ablation checkpoints and other options
+
+For any other checkpoint (no `leaf1_*` keys, not the released weights) the flags are used as given. For one pretrained with `--ablation`, pass the same `--ablation` and run at its training length (`--max_token_length` = the checkpoint's `max_position_embeddings`). Other options:
 
 - `--store_body_mean`: also write `embeddings/body_mean`, the mean over body tokens at `--target_layer` (n, D). Defined the same way for every ablation.
 - `--presample N`: draw `--n_fragment_per_file` fragments from the first N drawn with `--seed`. `--presample 100000 --n_fragment_per_file 10000` gives the Fig 4 fragment set.
