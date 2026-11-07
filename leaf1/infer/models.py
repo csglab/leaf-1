@@ -92,7 +92,19 @@ def check_weights_present(checkpoint_dir):
                     f'  git lfs pull --include="{rel}/**" --exclude=""')
 
 
+_MD5_CACHE = {}
+
+
 def _md5(path, chunk=1 << 24):
+    """md5 of a file, cached per process on (path, size, mtime) so a run hashes it once."""
+    st = Path(path).stat()
+    key = (str(Path(path).resolve()), st.st_size, st.st_mtime_ns)
+    if key not in _MD5_CACHE:
+        _MD5_CACHE[key] = _md5_uncached(path, chunk)
+    return _MD5_CACHE[key]
+
+
+def _md5_uncached(path, chunk):
     h = hashlib.md5()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(chunk), b""):

@@ -48,7 +48,7 @@ leaf1-extract --model leaf1-noflank-s42 --n_fragment_file /path/to/manifest.csv 
   --output_dir /path/to/output_dir --target_layer 4 --n_fragment_per_file 100000
 ```
 
-Leaving out `--model` gives `leaf1`, so the commands above are unchanged. `--bert_checkpoint <dir>` still works for any checkpoint dir; the two flags are mutually exclusive. Details, provenance and how to fetch the weights: [`encoder_checkpoints/README.md`](../../encoder_checkpoints/README.md).
+Leaving out `--model` gives `leaf1`, so the commands above give the same output as before (the released weights now refuse non-default `--max_token_length` / `--min_flank_token_length`; see below). `--bert_checkpoint <dir>` still works for any checkpoint dir; the two flags are mutually exclusive. Details, provenance and how to fetch the weights: [`encoder_checkpoints/README.md`](../../encoder_checkpoints/README.md).
 
 The checkpoints under `encoder_checkpoints/` carry their input settings in `config.json` (`leaf1_ablation`, `leaf1_max_token_length`, `leaf1_min_flank_token_length`), so `--ablation`, `--max_token_length` and `--min_flank_token_length` are set from the checkpoint whether it is selected with `--model` or `--bert_checkpoint`. Giving one of them with a different value is an error, because a model fed a different input format gives wrong embeddings without any other sign. The released `checkpoint/` is recognised by the md5 of its weights and held to its own format (`none`, 2048, 100) the same way. The model name is written to the H5 `metadata` as `leaf1_model` (not written for `leaf1`, so its H5 files are unchanged).
 

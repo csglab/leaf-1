@@ -11,7 +11,9 @@ Encoders from the manuscript revision, next to the released model in
 | `leaf1-nocristiano` | `encoder_checkpoints/leaf1-nocristiano/` | Same as `leaf1` | Released recipe without the Cristiano et al. cfDNA samples; 104,500 updates (23,500 at batch 4,088 + 81,000 at batch 768), stopped once validation loss reached the released model's | `6a8122f4eb3bd64c903cb930483574bb` |
 
 The main results in the manuscript use `leaf1`. Leaving out `--model` gives `leaf1`, so existing
-commands are unchanged.
+commands give the same output as before. One change: the released weights are now held to their own
+input format, so `--max_token_length` or `--min_flank_token_length` values other than 2048 and 100
+are refused for them.
 
 ## Fetching the weights
 

@@ -189,8 +189,56 @@ def test_pretrain_eqmask_sets_cut_rate(monkeypatch):
     monkeypatch.setattr(sys, "argv", base + ["--ablation", "eqmask", "--cut_mlm_probability", "0.5"])
     with pytest.raises(SystemExit):
         pretrain.parse_args()
+    monkeypatch.setattr(sys, "argv", base + ["--ablation", "eqmask", "--cut_mlm_probability", "0.30"])
+    with pytest.raises(SystemExit):     # an explicit 0.30 conflicts too; it used to be overwritten
+        pretrain.parse_args()
     monkeypatch.setattr(sys, "argv", base)
     assert pretrain.parse_args().cut_mlm_probability == 0.30
+    monkeypatch.setattr(sys, "argv", base + ["--cut_mlm_probability", "0.4"])
+    assert pretrain.parse_args().cut_mlm_probability == 0.4
+
+
+@pytest.mark.parametrize("ablation", ["nocut", "eqmask", "noflank", "nomod"])
+def test_pretrain_stamps_ablation_checkpoints(monkeypatch, tmp_path, ablation):
+    """A checkpoint pretrained with --ablation carries its input format, so extraction
+    without flags uses it and a conflicting flag is refused."""
+    import sys
+    from transformers import DistilBertConfig
+    from leaf1.train import pretrain
+    from leaf1.infer import models as M
+    base = ["x", "--train_csv", "a", "--val_csv", "b", "--output_root", "o", "--log_root", "l",
+            "--ablation", ablation, "--seq_len", "512", "--min_flank", "0"]
+    monkeypatch.setattr(sys, "argv", base)
+    cfg = DistilBertConfig()
+    pretrain.stamp_input_format(cfg, pretrain.parse_args())
+    cfg.save_pretrained(tmp_path)
+    cfg = DistilBertConfig.from_pretrained(tmp_path)
+    assert M.resolve_input(cfg) == (f"custom-{ablation}", ablation, 512, 0)
+    with pytest.raises(ValueError, match="pretrained with"):
+        M.resolve_input(cfg, ablation="none")
+
+
+def test_pretrain_noflank_stamps_zero_flank(monkeypatch):
+    import sys
+    from transformers import DistilBertConfig
+    from leaf1.train import pretrain
+    monkeypatch.setattr(sys, "argv", ["x", "--train_csv", "a", "--val_csv", "b", "--output_root", "o",
+                                      "--log_root", "l", "--ablation", "noflank", "--seq_len", "512"])
+    cfg = DistilBertConfig()
+    pretrain.stamp_input_format(cfg, pretrain.parse_args())   # default --min_flank 100
+    assert cfg.leaf1_min_flank_token_length == 0
+
+
+def test_pretrain_release_recipe_stays_unstamped(monkeypatch):
+    import sys
+    from transformers import DistilBertConfig
+    from leaf1.train import pretrain
+    from leaf1.infer import models as M
+    monkeypatch.setattr(sys, "argv", ["x", "--train_csv", "a", "--val_csv", "b", "--output_root", "o",
+                                      "--log_root", "l"])
+    cfg = DistilBertConfig()
+    pretrain.stamp_input_format(cfg, pretrain.parse_args())
+    assert M.stamped_input(cfg) == (None, None)
 
 
 # ---------- end-to-end extraction per arm (tiny random model, fixtures) ----------------------

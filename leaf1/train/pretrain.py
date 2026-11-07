@@ -79,7 +79,8 @@ def parse_args():
     p.add_argument("--lr_scheduler", type=str, default="linear")
     p.add_argument("--warmup_steps", type=int, default=1000)
     p.add_argument("--mlm_probability", type=float, default=0.15)
-    p.add_argument("--cut_mlm_probability", type=float, default=0.30)
+    p.add_argument("--cut_mlm_probability", type=float, default=None,
+                   help="Default 0.30 (with --ablation eqmask: --mlm_probability)")
     p.add_argument("--ablation", type=str, default="none", choices=list(ABLATIONS),
                    help="none | nocut | eqmask ([CUT] masked at --mlm_probability) | noflank | nomod")
     p.add_argument("--seed", type=int, default=42)
@@ -112,11 +113,29 @@ def parse_args():
     p.add_argument("--max_grad_norm", type=float, default=1.0)
     args = p.parse_args()
     if args.ablation == "eqmask":
-        if args.cut_mlm_probability not in (0.30, args.mlm_probability):
+        if args.cut_mlm_probability not in (None, args.mlm_probability):
             p.error("--ablation eqmask sets --cut_mlm_probability to --mlm_probability; "
                     f"got an explicit {args.cut_mlm_probability}")
         args.cut_mlm_probability = args.mlm_probability
+    elif args.cut_mlm_probability is None:
+        args.cut_mlm_probability = 0.30
     return args
+
+
+def stamp_input_format(model_config, args):
+    """Record an ablation run's input format in its config.json (leaf1_* keys).
+
+    leaf1-extract then takes the format from the checkpoint and refuses a conflicting
+    one (see leaf1/infer/models.py). Release-recipe runs (--ablation none) stay
+    unstamped, so their checkpoints look like the released one.
+    """
+    if args.ablation == "none":
+        return
+    model_config.leaf1_model = f"custom-{args.ablation}"
+    model_config.leaf1_ablation = args.ablation
+    model_config.leaf1_max_token_length = args.seq_len
+    # noflank inputs have no flanks, so --min_flank has no effect; record 0 like the shipped models
+    model_config.leaf1_min_flank_token_length = 0 if args.ablation == "noflank" else args.min_flank
 
 
 def build_compute_metrics(tokenizer):
@@ -327,6 +346,7 @@ def main():
         pad_token_id=train_dataset.tokenizer.pad_token_id,
         sep_token_id=train_dataset.tokenizer.sep_token_id,
     )
+    stamp_input_format(model_config, args)
     model = DistilBertForMaskedLM(model_config).to(device)
 
     n_params = sum(p.numel() for p in model.parameters())

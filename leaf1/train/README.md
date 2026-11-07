@@ -60,7 +60,7 @@ Full list: `leaf1-pretrain --help`. Paper-canonical values:
 | `noflank` | no flanks: `[CLS] [MOD] [CUT] body [CUT]` (use `--seq_len 512 --min_flank 0`) |
 | `nomod` | modality token replaced by the same placeholder (`[SEP]`) for every sample |
 
-Non-default runs get `_ABL<value>` appended to the run name.
+Non-default runs get `_ABL<value>` appended to the run name. Their `config.json` also records the input format (`leaf1_model: custom-<value>`, `leaf1_ablation`, and `--seq_len` / `--min_flank` as `leaf1_max_token_length` / `leaf1_min_flank_token_length`). `leaf1-extract` then uses that format without flags and refuses a conflicting one. With `--ablation eqmask`, passing a `--cut_mlm_probability` other than `--mlm_probability` is an error.
 
 ## Eval metrics
 

@@ -441,6 +441,13 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             if stored != (int(presample or 0), bool(per_fragment_rng)):
                 raise ValueError(f"(presample, per_fragment_rng) mismatch: stored {stored} vs current "
                                  f"{(int(presample or 0), bool(per_fragment_rng))}")
+            # absent attrs mean the release defaults (see where they are written below)
+            stored = (int(meta.get("max_token_length", leaf1_models.RELEASE_INPUT["max_token_length"])),
+                      int(meta.get("min_flank_token_length",
+                                   leaf1_models.RELEASE_INPUT["min_flank_token_length"])))
+            if stored != (int(max_token_length), int(min_flank_token_length)):
+                raise ValueError(f"(max_token_length, min_flank_token_length) mismatch: stored {stored} "
+                                 f"vs current {(int(max_token_length), int(min_flank_token_length))}")
             resume_from_batch = f["progress"].attrs["current_batch_idx"] + 1
             print(f"Resuming from batch {resume_from_batch}")
 
@@ -492,8 +499,13 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
             dataset_info["presample"] = int(presample)
         if per_fragment_rng:
             dataset_info["per_fragment_rng"] = True
-        if leaf1_model is not None or ablation != "none" or store_body_mean or presample or per_fragment_rng:
+        if (leaf1_model is not None or ablation != "none" or store_body_mean or presample
+                or per_fragment_rng
+                or max_token_length != leaf1_models.RELEASE_INPUT["max_token_length"]
+                or min_flank_token_length != leaf1_models.RELEASE_INPUT["min_flank_token_length"]):
             dataset_info["max_token_length"] = int(max_token_length)
+        if min_flank_token_length != leaf1_models.RELEASE_INPUT["min_flank_token_length"]:
+            dataset_info["min_flank_token_length"] = int(min_flank_token_length)
         create_h5_structure(
             h5_file, len(dataset), dataset_info,
             embed_dim=embed_dim, num_bert_layers=num_bert_layers,

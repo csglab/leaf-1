@@ -199,8 +199,34 @@ def test_unstamped_checkpoint_keeps_release_behavior(needs_bedtools, tokenizer_p
     emb, left, _, meta = _read(tmp_path / "b/h5_files/CFDNA_sample_x.h5")
     assert set(meta) == {"bed_file", "sample_id", "modality", "group", "n_fragments_total",
                          "n_fragments_sampled", "bert_checkpoint", "seed", "batch_size", "total_batches",
-                         "timestamp"}   # the released schema, no extra keys
+                         "timestamp", "max_token_length", "min_flank_token_length"}
+    # the released schema plus only the two non-default input settings, so a resume can check them
+    assert (meta["max_token_length"], meta["min_flank_token_length"]) == (128, 8)
     assert (left > 0).any()
+
+
+def test_resume_refuses_other_window(needs_bedtools, tokenizer_path, tiny_fa, tiny_manifest, tiny_plain,
+                                     tmp_path):
+    ee.evaluate_bed_file(**_kw(tiny_plain, tiny_manifest, tokenizer_path, tiny_fa, tmp_path),
+                         max_token_length=128, min_flank_token_length=8)
+    with h5py.File(tmp_path / "h5_files" / "CFDNA_sample_x.h5", "r+") as f:
+        f["progress"].attrs["completed"] = False
+    with pytest.raises(ValueError, match="min_flank_token_length"):
+        ee.evaluate_bed_file(**_kw(tiny_plain, tiny_manifest, tokenizer_path, tiny_fa, tmp_path),
+                             max_token_length=128, min_flank_token_length=16)
+
+
+def test_md5_is_computed_once_per_file(tmp_path, monkeypatch):
+    w = tmp_path / "model.safetensors"
+    w.write_bytes(b"\1" * 4096)
+    calls = []
+    real = M._md5_uncached
+    monkeypatch.setattr(M, "_md5_uncached", lambda p, c: calls.append(p) or real(p, c))
+    assert M._md5(w) == M._md5(w)
+    assert len(calls) == 1
+    w.write_bytes(b"\2" * 8192)          # a changed file is hashed again
+    M._md5(w)
+    assert len(calls) == 2
 
 
 def test_resume_refuses_other_model(needs_bedtools, tokenizer_path, tiny_fa, tiny_manifest, tiny_noflank,
