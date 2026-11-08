@@ -346,9 +346,23 @@ def check_encoders(hdf5_files, encoder_model):
         raise ValueError(
             f"The MIL classifier expects embeddings from {encoder_model!r}, but got {detail}. "
             "The released mil_checkpoint/ classifiers were fit on the released LEAF-1 encoder "
-            "(leaf1-extract --model leaf1) and are not valid for other encoders. If your classifier "
-            "was fit on another encoder's embeddings, pass that encoder exactly as shown above, "
-            f"e.g. --encoder_model {next(iter(bad))}")
+            "(leaf1-extract --model leaf1) and are not valid for other encoders, so do not override "
+            "this for them. Only if you trained your own classifier on another encoder's embeddings, "
+            f"pass that encoder exactly as shown above, e.g. --encoder_model {next(iter(bad))}")
+
+
+def check_complete(hdf5_files):
+    """Refuse H5s whose extraction stopped part-way: their unwritten rows are zeros.
+
+    H5s without a progress group (e.g. reshaped files) are taken as complete.
+    """
+    for path in hdf5_files:
+        with h5py.File(path, "r") as h5:
+            if "progress" in h5 and not bool(h5["progress"].attrs.get("completed", True)):
+                done = int(h5["progress"].attrs.get("processed_count", 0))
+                raise ValueError(
+                    f"{path}: extraction is not complete ({done} fragments written; the rest are "
+                    "zeros). Finish it by re-running the same leaf1-extract command, which resumes.")
 
 
 def run_inference(checkpoint_dir, hdf5_files, output_dir, *, all_folds=False,
@@ -362,6 +376,7 @@ def run_inference(checkpoint_dir, hdf5_files, output_dir, *, all_folds=False,
     import csv
 
     check_encoders(hdf5_files, encoder_model)
+    check_complete(hdf5_files)
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     models, seg_idx, seg_str = load_ensemble(

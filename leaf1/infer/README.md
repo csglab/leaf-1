@@ -28,8 +28,11 @@ leaf1-extract \
   --index 0 \
   --output_dir /path/to/output_dir \
   --target_layer 4 \
-  --n_fragment_per_file 100000
+  --n_fragment_per_file 100000 \
+  --batch_size 64
 ```
+
+`--batch_size` changes which strand and flank trim each fragment gets (the random stream is shared per batch), so it is part of the result. The paper and the published embeddings used 64, which is also the default of `scripts/extract_embeddings.sh`. The CLI default is 32.
 
 To extract all 13 layers instead of one, drop `--target_layer`. File size scales by ~13x.
 
@@ -60,7 +63,7 @@ For any other checkpoint (no `leaf1_*` keys, not the released weights) the flags
 - `--presample N`: draw `--n_fragment_per_file` fragments from the first N drawn with `--seed`. `--presample 100000 --n_fragment_per_file 10000` gives the Fig 4 fragment set.
 - `--per_fragment_rng`: seed strand and flank trimming per fragment, so the same fragment is processed identically by every model.
 
-For `nocut` the two [CUT] chunks are zeros; for `noflank` the left and right flank chunks are zeros.
+For `nocut` the two [CUT] chunks are zeros. For `noflank` the left and right flank chunks are zeros, and so are `fragment1` and `fragment2`: the three pooling windows split the whole 512-token input, and the body (at most ~50 tokens) falls in the first, `fragment0`. For noflank embeddings, use `fragment0` (or `embeddings/body_mean`) as the body readout, not the default `cut,mod,fragment1`.
 
 ## H5 schema
 
@@ -70,6 +73,7 @@ Output path: `<output_dir>/h5_files/<modality>_<sample_id>.h5`.
 embeddings/
   bert_window_embeddings        # (n, 9984) float16          when --target_layer is set
                                 # (n, 13, 9984) float16      when omitted (embedding + 12 layers)
+  body_mean                     # (n, D) float16             only with --store_body_mean
   attrs:
     num_windows = 3
     embed_dim = D               # 768 for the paper model; read from checkpoint config
@@ -94,6 +98,9 @@ metadata/
          bert_checkpoint, seed, batch_size,
          n_fragments_total, n_fragments_sampled,
          total_batches, timestamp
+         # written only when not at the released defaults:
+         leaf1_model, ablation, max_token_length, min_flank_token_length,
+         store_body_mean, presample, per_fragment_rng
 
 progress/
   attrs: current_batch_idx, total_batches,

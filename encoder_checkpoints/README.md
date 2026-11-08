@@ -32,8 +32,12 @@ git lfs pull --include="encoder_checkpoints/leaf1-noflank-s42/**" --exclude=""
 ```bash
 leaf1-extract --model leaf1-noflank-s42 \
   --n_fragment_file /path/to/manifest.csv --index 0 \
-  --output_dir /path/to/out --target_layer 4 --n_fragment_per_file 100000
+  --output_dir /path/to/out --target_layer 4 --n_fragment_per_file 100000 --batch_size 64
 ```
+
+For the noflank models the fragment body is pooled into the `fragment0` chunk (`fragment1` and
+`fragment2` are zeros), so read it from `fragment0` or `--store_body_mean`, not the default
+`cut,mod,fragment1` segments. The released `mil_checkpoint/` classifiers are for `leaf1` only.
 
 or with the multi-GPU wrapper, pass the directory:
 

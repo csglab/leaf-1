@@ -358,6 +358,7 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
     # checkpoint (leaf1_* keys in config.json), or the released defaults if it has none.
     if store_body_mean and target_layer is None:
         raise ValueError("--store_body_mean requires --target_layer")
+    leaf1_models.check_ref_genome_present(ref_genome_file)
     output_dir = Path(output_dir)
     h5_dir = output_dir / "h5_files"
     log_dir = output_dir / "logs"
@@ -389,6 +390,10 @@ def evaluate_bed_file(bert_checkpoint, n_fragment_file, n_fragment_per_file, ind
     check_ablation(ablation)
     if leaf1_model in leaf1_models.MODELS:
         leaf1_models.check_md5(leaf1_model, bert_checkpoint)
+    elif leaf1_model is None and leaf1_models.is_registered_path(leaf1_models.DEFAULT_MODEL, bert_checkpoint):
+        # the repo's own checkpoint/ is unstamped, so a damaged copy would otherwise be
+        # taken for a custom checkpoint and run without any error
+        leaf1_models.check_md5(leaf1_models.DEFAULT_MODEL, bert_checkpoint)
     if leaf1_model is not None:
         print(f"Checkpoint is {leaf1_model}: ablation={ablation} max_token_length={max_token_length} "
               f"min_flank_token_length={min_flank_token_length} (from its config.json)")

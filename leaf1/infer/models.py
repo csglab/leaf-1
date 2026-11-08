@@ -95,6 +95,18 @@ def check_weights_present(checkpoint_dir):
 _MD5_CACHE = {}
 
 
+def check_ref_genome_present(fasta):
+    """Fail clearly if the reference FASTA is a Git LFS pointer (bedtools would only report EOF)."""
+    fasta = Path(fasta)
+    if fasta.is_file() and fasta.stat().st_size < 1024:
+        with open(fasta, "rb") as f:
+            if f.read(len(_LFS_POINTER_PREFIX)) == _LFS_POINTER_PREFIX:
+                raise RuntimeError(
+                    f"{fasta} is a Git LFS pointer, not the genome. Fetch it with:\n"
+                    '  git lfs pull --include="assets/refseq.genome.fa"\n'
+                    "or pass your own hg38 FASTA (with .fai) as --ref_genome_file.")
+
+
 def _md5(path, chunk=1 << 24):
     """md5 of a file, cached per process on (path, size, mtime) so a run hashes it once."""
     st = Path(path).stat()
@@ -118,8 +130,18 @@ def check_md5(name, checkpoint_dir):
     if got != want:
         raise RuntimeError(
             f"{checkpoint_dir}/model.safetensors has md5 {got}, expected {want} for --model {name}. "
-            "The file is incomplete or not this model; re-fetch it with "
-            f'git lfs pull --include="{get_model(name)["path"]}/**" --exclude="".')
+            "The file is incomplete, modified, or not this model. Delete it and fetch it again "
+            "(git lfs pull does not overwrite an existing file):\n"
+            f'  rm {Path(checkpoint_dir) / "model.safetensors"}\n'
+            f'  git lfs pull --include="{get_model(name)["path"]}/**" --exclude=""')
+
+
+def is_registered_path(name, checkpoint_dir):
+    """True if checkpoint_dir is the repo's own directory for model `name`."""
+    try:
+        return Path(checkpoint_dir).resolve() == model_path(name).resolve()
+    except OSError:
+        return False
 
 
 def stamped_input(model_config):

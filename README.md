@@ -65,7 +65,7 @@ leaf-1/
 │   │   └── mil/                    # gated-attention MIL classifier
 │   └── util/                       # preprocessing + layer reshape + extract validation
 ├── scripts/                        # shell launchers (torchrun, GNU parallel)
-├── tests/                          # 147 tests; pytest
+├── tests/                          # pytest suite
 ├── environment-gpu.yml             # paper-era CUDA 12.1 / PyTorch 2.1 conda env
 ├── pyproject.toml                  # PEP 517 / 518 install + CLI entry points
 ├── checkpoint/                     # frozen LEAF-1 encoder, Git LFS-backed
@@ -124,7 +124,7 @@ require a newer NVIDIA driver than is installed.
 conda create -n leaf1 python=3.10 pip bedtools samtools -y
 conda activate leaf1
 pip install -e ".[test]"
-pytest tests/ -v   # 147 tests
+pytest tests/ -v
 ```
 
 ### System dependencies
@@ -237,7 +237,8 @@ leaf1-extract \
   --output_dir       /tmp/leaf1_out \
   --target_layer     4 \
   --n_fragment_per_file 100000 \
-  --seed             42
+  --seed             42 \
+  --batch_size       64   # the paper's value; it affects strand/flank draws, so keep it to reproduce
 ```
 
 Result: `/tmp/leaf1_out/h5_files/CFDNA_sample_x.h5` with `embeddings/bert_window_embeddings`
@@ -439,7 +440,7 @@ selection, and torch build fixed.
 pytest tests/ -v
 ```
 
-147 tests cover fragment tokenisation, the MLM collator, the multi-window pool,
+The tests cover fragment tokenisation, the MLM collator, the multi-window pool,
 H5 round-trip integrity, the BED preprocessing and reshape utilities, the
 mean-pool linear probe, and the MIL data loader and model components. Most
 tests run in seconds; a handful require `bedtools` on the PATH (these skip

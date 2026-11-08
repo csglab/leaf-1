@@ -409,3 +409,46 @@ def test_real_released_checkpoint_refuses_noflank():
     assert M.resolve_input(cfg, d) == (None, "none", 2048, 100)
     with pytest.raises(ValueError, match="released LEAF-1 encoder"):
         M.resolve_input(cfg, d, ablation="noflank")
+
+
+# ---------- audit follow-ups (2026-11-07) --------------------------------------------------------
+
+def test_mil_refuses_incomplete_h5(tmp_path):
+    from leaf1.downstream.mil import inference as inf
+    p = _h5(tmp_path / "part.h5", sample_id="a")
+    with h5py.File(p, "r+") as f:
+        f.create_group("progress").attrs.update({"completed": False, "processed_count": 256})
+    with pytest.raises(ValueError, match="not complete .256 fragments"):
+        inf.check_complete([p])
+    with h5py.File(p, "r+") as f:
+        f["progress"].attrs["completed"] = True
+    inf.check_complete([p])
+    inf.check_complete([_h5(tmp_path / "reshaped.h5", sample_id="b")])   # no progress group: OK
+
+
+def test_damaged_repo_checkpoint_is_caught_via_bert_checkpoint(needs_bedtools, tokenizer_path, tiny_fa,
+                                                              tiny_manifest, tmp_path, monkeypatch, tiny_plain):
+    """--bert_checkpoint <repo>/checkpoint with damaged weights must fail the md5 check, not run
+    as an unknown custom checkpoint."""
+    import shutil
+    d = tmp_path / "checkpoint"
+    shutil.copytree(tiny_plain, d)
+    monkeypatch.setattr(M, "REPO_ROOT", tmp_path)
+    assert M.is_registered_path("leaf1", d) and M.is_registered_path("leaf1", str(d) + "/")
+    assert not M.is_registered_path("leaf1", tiny_plain)
+    with pytest.raises(RuntimeError, match=r"md5[\s\S]*rm .*model.safetensors[\s\S]*--exclude"):
+        ee.evaluate_bed_file(**_kw(str(d), tiny_manifest, tokenizer_path, tiny_fa, tmp_path / "out"),
+                             max_token_length=128, min_flank_token_length=8)
+    assert not (tmp_path / "out" / "h5_files" / "CFDNA_sample_x.h5").exists()
+    # the same weights anywhere else are an ordinary custom checkpoint
+    ee.evaluate_bed_file(**_kw(tiny_plain, tiny_manifest, tokenizer_path, tiny_fa, tmp_path / "ok"),
+                         max_token_length=128, min_flank_token_length=8)
+
+
+def test_ref_genome_lfs_pointer_detected(tmp_path):
+    fa = tmp_path / "refseq.genome.fa"
+    fa.write_bytes(b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 3255371540\n")
+    with pytest.raises(RuntimeError, match="Git LFS pointer, not the genome"):
+        M.check_ref_genome_present(fa)
+    fa.write_bytes(b">chr1\nACGT\n")
+    M.check_ref_genome_present(fa)
