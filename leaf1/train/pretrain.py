@@ -365,6 +365,9 @@ def main():
         dataloader_pin_memory=True,
         dataloader_num_workers=args.n_worker,
         dataloader_persistent_workers=False,
+        # don't replay the dataloader on resume: it's bedtools-bound, so skipping N batches takes
+        # hours, and the corpus is randomly sampled anyway
+        ignore_data_skip=True,
         fp16=args.fp16,
         bf16=args.bf16,
         seed=args.seed,
