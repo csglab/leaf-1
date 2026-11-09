@@ -290,6 +290,9 @@ def _worker_precollate_epoch(args: Tuple) -> Tuple[int, int, float]:
     epoch_dir = Path(output_dir) / f"epoch_{epoch_idx}"
     epoch_dir.mkdir(parents=True, exist_ok=True)
 
+    # row k of the epoch holds sample shuffled_indices[k % n]; saved to map predictions back to samples
+    np.save(epoch_dir / "order.npy", np.asarray(shuffled_indices, dtype=np.int64))
+
     # Create mmap'd output files - write directly to disk, no RAM allocation!
     bags_shape = (n_batches, batch_size, n_frags, feat_dim)
     masks_shape = (n_batches, batch_size, n_frags)
@@ -485,6 +488,11 @@ class PrecollatedStorage:
         """Get path to epoch directory."""
         return self.storage_path / f"epoch_{epoch_idx}"
 
+    def row_positions(self, epoch_idx: int = 0) -> np.ndarray:
+        """Sample position of each of the first n_samples rows of an epoch, in stored batch order.
+        Rows after that are wraparound repeats filling the last batch."""
+        return np.load(self.get_epoch_path(epoch_idx) / "order.npy")[:self.n_samples]
+
     def get_n_batches(self) -> int:
         """Get number of batches per epoch."""
         return self.n_batches
@@ -521,7 +529,8 @@ class OptimizedBatchIterator:
         n_readers: int = 6,
         queue_depth: int = 3,
         return_sids: bool = False,
-        n_buffers = None
+        n_buffers = None,
+        shuffle: bool = True,
     ):
         """
         Args:
@@ -531,13 +540,17 @@ class OptimizedBatchIterator:
             n_readers: Number of reader threads (default: 6)
             queue_depth: Queue depth for prefetching (default: 3)
             return_sids: If True, return sample IDs (not supported in optimized mode)
+            shuffle: If False, yield batches in stored order (needs n_readers=1)
         """
+        if not shuffle and n_readers != 1:
+            raise ValueError("shuffle=False needs n_readers=1 to keep batch order")
         self.storage = storage
         self.device = device
         self.normalizer = normalizer
         self.n_readers = n_readers
         self.queue_depth = queue_depth
         self.return_sids = return_sids
+        self.shuffle = shuffle
 
         # Pre-allocate PINNED buffers
         n_buffers = queue_depth + 2 if n_buffers is None else n_buffers # Extra for safety
@@ -578,9 +591,10 @@ class OptimizedBatchIterator:
         masks_mmap = np.load(epoch_dir / "masks.npy", mmap_mode='r')
         labels_mmap = np.load(epoch_dir / "labels.npy", mmap_mode='r')
 
-        # 3. Shuffle batch order
+        # 3. Shuffle batch order (always drawn, so the global RNG stream doesn't depend on shuffle)
         n_batches = self.storage.n_batches
-        self._current_batch_order = np.random.permutation(n_batches).tolist()
+        perm = np.random.permutation(n_batches).tolist()
+        self._current_batch_order = perm if self.shuffle else list(range(n_batches))
 
         # 4. Setup queues
         buffer_pool = queue.Queue()

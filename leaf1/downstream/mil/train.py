@@ -619,7 +619,8 @@ def train_inner_fold_cpu_optimized(
         normalizer=normalizer,
         n_readers=1,
         queue_depth=1,
-        n_buffers=2
+        n_buffers=2,
+        shuffle=False,
     )
     
     test_iterator = OptimizedBatchIterator(
@@ -628,7 +629,8 @@ def train_inner_fold_cpu_optimized(
         normalizer=normalizer,
         n_readers=1,
         queue_depth=1,
-        n_buffers=2
+        n_buffers=2,
+        shuffle=False,
     )
     
     # ==========================================================================
@@ -645,6 +647,8 @@ def train_inner_fold_cpu_optimized(
         device=device,
         args=args,
         output_dir=output_dir,
+        val_sids=[sids_outer_train[i] for i in bags_va_idx],
+        test_sids=list(sids_outer_test),
     )
     
     # ==========================================================================
@@ -663,6 +667,16 @@ def train_inner_fold_cpu_optimized(
     return result
 
 
+def _preds_by_sample(probs, labels, iterator: OptimizedBatchIterator, sids, prefix: str) -> dict:
+    """One row per sample with its real ID; drops the wraparound repeats in the last batch."""
+    pos = iterator.storage.row_positions()
+    return {
+        'sample_id': [sids[p] if sids is not None else f"{prefix}_{p}" for p in pos],
+        'label': labels[:len(pos)].tolist(),
+        'prob': probs[:len(pos)].tolist(),
+    }
+
+
 def _train_inner_fold_optimized(
     inner_fold: int,
     train_iterator: OptimizedBatchIterator,
@@ -672,8 +686,13 @@ def _train_inner_fold_optimized(
     device: str,
     args,
     output_dir: Path,
+    val_sids: list = None,
+    test_sids: list = None,
 ) -> dict:
-    """Training loop for OPTIMIZED pipeline (uses iterators instead of DataLoaders)."""
+    """Training loop for OPTIMIZED pipeline (uses iterators instead of DataLoaders).
+
+    Model selection still uses the val AUC over all val rows, including the wraparound repeats.
+    Saved predictions and reported AUCs use one row per sample."""
     
     fold_dir = output_dir / f"inner_fold_{inner_fold}"
     
@@ -864,7 +883,9 @@ def _train_inner_fold_optimized(
                 test_pbar.close()
                 test_probs = np.concatenate(test_probs)
                 test_labels_all = np.concatenate(test_labels_all)
-                test_auc = roc_auc_score(test_labels_all, test_probs) if len(np.unique(test_labels_all)) > 1 else 0.5
+                test_preds_now = _preds_by_sample(test_probs, test_labels_all, test_iterator, test_sids, "test")
+                test_auc = (roc_auc_score(test_preds_now['label'], test_preds_now['prob'])
+                            if len(np.unique(test_preds_now['label'])) > 1 else 0.5)
 
                 last_test_auc = test_auc
                 test_was_run = True
@@ -878,16 +899,8 @@ def _train_inner_fold_optimized(
                     'pool': {k: v.cpu().clone() for k, v in pool.state_dict().items()},
                     'head': {k: v.cpu().clone() for k, v in head.state_dict().items()},
                 }
-                best_val_preds = {
-                    'sample_id': [f"val_{i}" for i in range(len(val_probs))],
-                    'label': val_labels_all.tolist(),
-                    'prob': val_probs.tolist(),
-                }
-                best_test_preds = {
-                    'sample_id': [f"test_{i}" for i in range(len(test_probs))],
-                    'label': test_labels_all.tolist(),
-                    'prob': test_probs.tolist(),
-                }
+                best_val_preds = _preds_by_sample(val_probs, val_labels_all, val_iterator, val_sids, "val")
+                best_test_preds = test_preds_now
             else:
                 es_patience_counter += 1
                 if es_patience_counter >= args.early_stop_patience:
@@ -925,11 +938,7 @@ def _train_inner_fold_optimized(
             'pool': {k: v.cpu().clone() for k, v in pool.state_dict().items()},
             'head': {k: v.cpu().clone() for k, v in head.state_dict().items()},
         }
-        best_val_preds = {
-            'sample_id': [f"val_{i}" for i in range(len(val_probs))],
-            'label': val_labels_all.tolist(),
-            'prob': val_probs.tolist(),
-        }
+        best_val_preds = _preds_by_sample(val_probs, val_labels_all, val_iterator, val_sids, "val")
         best_metric_epoch = epoch
         best_metric_value = val_auc
 
@@ -963,11 +972,7 @@ def _train_inner_fold_optimized(
         test_pbar.close()
         test_probs = np.concatenate(test_probs)
         test_labels_all = np.concatenate(test_labels_all)
-        best_test_preds = {
-            'sample_id': [f"test_{i}" for i in range(len(test_probs))],
-            'label': test_labels_all.tolist(),
-            'prob': test_probs.tolist(),
-        }
+        best_test_preds = _preds_by_sample(test_probs, test_labels_all, test_iterator, test_sids, "test")
 
     checkpoint = {
         'proj_state_dict': best_state['proj'],
@@ -1751,16 +1756,24 @@ def main():
     oof_df.to_csv(output_dir / "oof_predictions.csv", index=False)
     print(f"  OOF predictions: {len(oof_df)} samples")
     
-    test_probs_stack = np.array([p['prob'] for p in all_test_preds])
-    ensemble_probs = test_probs_stack.mean(axis=0)
+    # align inner folds by sample ID before averaging
+    ref_ids = list(all_test_preds[0]['sample_id'])
+    aligned = []
+    for p in all_test_preds:
+        df_p = pd.DataFrame(p).set_index('sample_id')
+        assert df_p.index.is_unique and set(df_p.index) == set(ref_ids), "inner folds scored different test samples"
+        df_p = df_p.loc[ref_ids]
+        assert (df_p['label'].to_numpy() == np.asarray(all_test_preds[0]['label'])).all(), "label mismatch across inner folds"
+        aligned.append(df_p['prob'].to_numpy())
+    ensemble_probs = np.mean(aligned, axis=0)
     
     ensemble_df = pd.DataFrame({
-        'sample_id': all_test_preds[0]['sample_id'],
+        'sample_id': ref_ids,
         'label': all_test_preds[0]['label'],
         'prob_ensemble': ensemble_probs.tolist(),
     })
-    for i, p in enumerate(all_test_preds):
-        ensemble_df[f'prob_if{inner_folds_to_train[i]}'] = p['prob']
+    for i, a in enumerate(aligned):
+        ensemble_df[f'prob_if{inner_folds_to_train[i]}'] = a
     ensemble_df.to_csv(output_dir / "ensemble_test_preds.csv", index=False)
     
     if len(np.unique(ensemble_df['label'])) > 1:
